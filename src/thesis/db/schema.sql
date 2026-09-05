@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     target_table    TEXT        NOT NULL,
     in_top          BOOLEAN     NOT NULL,
     in_random       BOOLEAN     NOT NULL,
-    rows_parsed     BIGINT      NOT NULL,
+    rows_read       BIGINT      NOT NULL,
+    rows_copied     BIGINT      NOT NULL,
     rows_written    BIGINT      NOT NULL,
     started_at      TIMESTAMPTZ NOT NULL,
     finished_at     TIMESTAMPTZ NOT NULL
