@@ -1,0 +1,40 @@
+# Copy this file to config.toml and fill in the values.
+#
+#   config.toml is gitignored: it holds the database credentials and every
+#   value not fixed by the osu! domain. Nothing outside it is tunable.
+#
+#   Loading order: --config PATH, then $THESIS_CONFIG, then <repo root>/config.toml.
+#   A missing file is an error, never a silent fallback to these example values.
+#
+#   Sections for the model and training stages are added by the plans that
+#   introduce their consumers. A knob with no reader does not belong here.
+
+[db]
+# PostgreSQL connection string for the osu! dump database.
+dsn = "postgresql://USER:PASSWORD@HOST:5432/thesis"
+
+[paths]
+# Where every derived artifact is written. Relative paths resolve against the
+# repository root. On Colab, point this at the mounted Drive folder.
+artifacts = "artifacts"
+
+[data]
+# Which response view to read and which dump pool to keep.
+response = "acc"      # "acc" | "score"
+pool = "random"       # "random" | "top" | "all"
+
+# Keymodes in scope. 4K and 7K share no items, so users who play both are the
+# only things tying the two scales together.
+keys = [4, 7]
+
+# A user counts as linking the keymodes when they have at least this many
+# responses in every keymode listed above.
+link_threshold = 10
+
+[data.diagnostics]
+# Thresholds swept by 02_linking_report.py.
+link_thresholds = [1, 2, 5, 10, 20, 50]
+
+# Grid swept by 03_kcore_sweep.py: minimum responses per item and per person.
+kcore_min_items = [5, 10, 20, 50, 100]
+kcore_min_users = [5, 10, 20, 50]
