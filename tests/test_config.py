@@ -73,10 +73,17 @@ def test_missing_file_fails_loudly(tmp_path, monkeypatch):
 		config.load()
 
 
-def test_missing_key_names_the_section_and_key(tmp_path, monkeypatch):
+def test_missing_section_is_named(tmp_path, monkeypatch):
 	path = write_config(tmp_path, '[db]\ndsn = "postgresql://h/d"\n')
 	monkeypatch.setenv("THESIS_CONFIG", str(path))
-	with pytest.raises(config.ConfigError, match=r"\[data\].*response"):
+	with pytest.raises(config.ConfigError, match=r"missing section \[data\]"):
+		config.load()
+
+
+def test_missing_key_inside_a_present_section_is_named(tmp_path, monkeypatch):
+	path = write_config(tmp_path, TEMPLATE.replace('response = "score"\n', ""))
+	monkeypatch.setenv("THESIS_CONFIG", str(path))
+	with pytest.raises(config.ConfigError, match=r"missing \[data\] response"):
 		config.load()
 
 
@@ -109,7 +116,9 @@ def test_non_integer_in_a_list_is_rejected(tmp_path, monkeypatch):
 
 
 def test_empty_list_is_rejected(tmp_path, monkeypatch):
-	path = write_config(tmp_path, TEMPLATE.replace("kcore_min_items = [11, 22]", "kcore_min_items = []"))
+	path = write_config(
+		tmp_path, TEMPLATE.replace("kcore_min_items = [11, 22]", "kcore_min_items = []")
+	)
 	monkeypatch.setenv("THESIS_CONFIG", str(path))
 	with pytest.raises(config.ConfigError, match="kcore_min_items"):
 		config.load()
