@@ -23,9 +23,9 @@ artifacts = "artifacts"
 response = "acc"      # "acc" | "score"
 pool = "random"       # "random" | "top" | "all"
 
-# Keymodes in scope. 4K and 7K share no items, so users who play both are the
-# only things tying the two scales together.
-keys = [4, 7]
+# Every keymode present in the dumps. Items are selected by response density in
+# the k-core sweep, not by key count.
+keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18]
 
 # A user counts as linking the keymodes when they have at least this many
 # responses in every keymode listed above.

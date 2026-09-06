@@ -23,7 +23,7 @@ VIEW_COLUMNS = {
 	"beatmap_id",
 	"rate_group",
 	"response",
-	"mania_keys",
+	"keys",
 	"in_top",
 	"in_random",
 }
@@ -94,7 +94,7 @@ def seed(conn, beatmaps, scores):
 
 def rows(conn, view: str, **where):
 	clause = " AND ".join(f"{k} = %s" for k in where)
-	sql_text = f"SELECT user_id, rate_group, response, mania_keys FROM {view}"
+	sql_text = f"SELECT user_id, rate_group, response, keys FROM {view}"
 	if clause:
 		sql_text += f" WHERE {clause}"
 	with conn.cursor() as cur:

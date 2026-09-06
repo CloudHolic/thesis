@@ -156,8 +156,13 @@ def test_shipped_example_is_loadable(tmp_path, monkeypatch):
 
 	cfg = config.load()
 
+	# the point is that the shipped template parses and validates, not what any
+	# particular knob is set to
 	assert cfg.data.response in ("acc", "score")
-	assert cfg.data.keys == (4, 7)
+	assert cfg.data.pool in ("random", "top", "all")
+	assert cfg.data.keys
+	assert cfg.data.link_threshold > 0
+	assert cfg.data.diagnostics.kcore_min_items
 
 
 def test_config_does_not_import_jax():
