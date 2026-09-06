@@ -41,7 +41,7 @@ quote-style = "double"
 indent-style = "tab"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["scratch/tests"]
 markers = ["db: requires a live PostgreSQL connection"]
 
 [tool.ty.environment]

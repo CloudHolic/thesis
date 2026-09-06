@@ -17,9 +17,11 @@ def responses(*, dsn: str, response: str, keys: Sequence[int], pool: str) -> pl.
 		raise ValueError(f"pool must be one of {list(domain.POOLS)}")
 
 	key_list = ", ".join(str(int(k)) for k in keys)
-	where = [f"keys IN ({key_list})"]
-	if pool != "all":
-		where.append(f"in_{pool}")
+
+	if pool not in domain.POOLS:
+		raise ValueError(f"pool must be one of {list(domain.POOLS)}")
+
+	where = [f"keys IN ({key_list})", "pool = %s"]
 
 	sql = (
 		f"SELECT user_id, beatmap_id, rate_group, response, keys "

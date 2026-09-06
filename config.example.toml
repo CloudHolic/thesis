@@ -38,3 +38,15 @@ link_thresholds = [1, 2, 5, 10, 20, 50]
 # Grid swept by 03_kcore_sweep.py: minimum responses per item and per person.
 kcore_min_items = [5, 10, 20, 50, 100]
 kcore_min_users = [5, 10, 20, 50]
+
+[data.sample]
+# The pilot fits a stratified draw from the core rather than the whole thing:
+# the first question is whether the machinery works, and that needs fast
+# iteration. Raise this once synthetic recovery and the ID baseline hold up.
+n_items = 1000
+
+# Items per keymode are allocated proportionally, but never below this, so the
+# rare key counts survive to identify the log K coefficient.
+min_items_per_key = 1
+
+seed = 20260906
