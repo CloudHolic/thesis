@@ -1,7 +1,7 @@
 CREATE OR REPLACE VIEW v_response_acc AS
 WITH filtered AS (
     SELECT s.user_id, s.beatmap_id, s.accuracy, s.score, s.in_top, s.in_random,
-           b.keys AS mania_keys,
+           b.keys,
            CASE WHEN (s.mods & (64 | 512)) <> 0 THEN 'DT'
                 WHEN (s.mods & 256) <> 0        THEN 'HT'
                 ELSE 'NM' END AS rate_group
@@ -11,7 +11,7 @@ WITH filtered AS (
 ),
      best AS (
          SELECT DISTINCT ON (f.user_id, f.beatmap_id, f.rate_group)
-             f.user_id, f.beatmap_id, f.rate_group, f.accuracy, f.mania_keys,
+             f.user_id, f.beatmap_id, f.rate_group, f.accuracy, f.keys,
              f.in_top, f.in_random
          FROM filtered f
          ORDER BY f.user_id, f.beatmap_id, f.rate_group, f.accuracy DESC, f.score DESC
@@ -19,7 +19,7 @@ WITH filtered AS (
 SELECT
     b.user_id, b.beatmap_id, b.rate_group,
     b.accuracy AS response,
-    b.mania_keys,
+    b.keys,
     b.in_top, b.in_random
 FROM best b;
 
@@ -27,7 +27,7 @@ FROM best b;
 CREATE OR REPLACE VIEW v_response_score AS
 WITH filtered AS (
     SELECT s.user_id, s.beatmap_id, s.accuracy, s.in_top, s.in_random,
-           b.keys AS mania_keys,
+           b.keys,
            CASE WHEN (s.mods & (64 | 512)) <> 0 THEN 'DT'
                 WHEN (s.mods & 256) <> 0        THEN 'HT'
                 ELSE 'NM' END AS rate_group,
@@ -42,7 +42,7 @@ WITH filtered AS (
 ),
      best AS (
          SELECT DISTINCT ON (f.user_id, f.beatmap_id, f.rate_group)
-             f.user_id, f.beatmap_id, f.rate_group, f.response, f.mania_keys,
+             f.user_id, f.beatmap_id, f.rate_group, f.response, f.keys,
              f.in_top, f.in_random
          FROM filtered f
          ORDER BY f.user_id, f.beatmap_id, f.rate_group, f.response DESC, f.accuracy DESC
@@ -50,6 +50,6 @@ WITH filtered AS (
 SELECT
     b.user_id, b.beatmap_id, b.rate_group,
     b.response,
-    b.mania_keys,
+    b.keys,
     b.in_top, b.in_random
 FROM best b;
