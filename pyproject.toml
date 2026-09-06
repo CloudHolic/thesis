@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.6",
+    "ty>=0.0.78",
 ]
 
 [build-system]
@@ -42,3 +43,6 @@ indent-style = "tab"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["db: requires a live PostgreSQL connection"]
+
+[tool.ty.environment]
+python-version = "3.12"

@@ -1,4 +1,4 @@
-"""Parsing of osu! MySQL dump INSERT statements into typed rows."""
+"""Parsing of osu! MySQL dumps INSERT statements into typed rows."""
 
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def mania_accuracy(
 	count_50: int,
 	count_miss: int,
 ) -> float:
-	"""osu!mania ScoreV1 accuracy from judgment counts, in [0, 1]."""
+	"""osu!mania Score-V1 accuracy from judgment counts, in [0, 1]."""
 	total = count_max + count_300 + count_200 + count_100 + count_50 + count_miss
 	if total == 0:
 		return 0.0

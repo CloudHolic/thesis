@@ -34,7 +34,7 @@ def per_user_counts(df: pl.DataFrame, *, keys: Sequence[int]) -> pl.DataFrame:
 
 
 def summary(df: pl.DataFrame, *, keys: Sequence[int], thresholds: Sequence[int]) -> pl.DataFrame:
-	"""Per threshold: users meeting it in every key, and in each one alone.
+	"""Per threshold: users meeting it in every key and in each one alone.
 
 	`n_both` collapses towards zero once more than two keys are listed, since
 	almost nobody plays them all; `pairwise` is the readable form in that case.

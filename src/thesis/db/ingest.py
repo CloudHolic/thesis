@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import tarfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import psycopg
+from psycopg import sql
 
 from . import dump
 
@@ -131,27 +132,40 @@ def _convert(table: str, values: list[Any], *, in_top: bool, in_random: bool):
 	return dump.to_beatmap_row(values)
 
 
-def _upsert_sql(table: str, staging: str) -> str:
+def _identifiers(names: Sequence[str]) -> sql.Composed:
+	return sql.SQL(", ").join(sql.Identifier(n) for n in names)
+
+
+def _upsert_sql(table: str, staging: str) -> sql.Composed:
 	columns = _COLUMNS[table]
 	key = _PRIMARY_KEY[table]
-	joined = ", ".join(columns)
 
 	if table == SCORE_TABLE:
-		update = (
-			f"in_top = {table}.in_top OR EXCLUDED.in_top, "
-			f"in_random = {table}.in_random OR EXCLUDED.in_random"
-		)
+		update = sql.SQL(
+			"in_top = {table}.in_top OR EXCLUDED.in_top, "
+			"in_random = {table}.in_random OR EXCLUDED.in_random"
+		).format(table=sql.Identifier(table))
 	else:
-		update = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns if c != key)
+		update = sql.SQL(", ").join(
+			sql.SQL("{column} = EXCLUDED.{column}").format(column=sql.Identifier(c))
+			for c in columns
+			if c != key
+		)
 
-	return (
-		f"INSERT INTO {table} ({joined}) "
-		f"SELECT DISTINCT ON ({key}) {joined} FROM {staging} "
-		f"ON CONFLICT ({key}) DO UPDATE SET {update}"
+	return sql.SQL(
+		"INSERT INTO {table} ({columns}) "
+		"SELECT DISTINCT ON ({key}) {columns} FROM {staging} "
+		"ON CONFLICT ({key}) DO UPDATE SET {update}"
+	).format(
+		table=sql.Identifier(table),
+		columns=_identifiers(columns),
+		key=sql.Identifier(key),
+		staging=sql.Identifier(staging),
+		update=update,
 	)
 
 
-def _split_header(handle) -> tuple[list[str], str | None]:
+def _split_header(handle: Iterator[bytes]) -> tuple[list[str], str | None]:
 	"""Lines before the first INSERT, and that INSERT line itself."""
 	header: list[str] = []
 
@@ -164,7 +178,7 @@ def _split_header(handle) -> tuple[list[str], str | None]:
 	return header, None
 
 
-def _lines(first: str | None, handle) -> Iterator[str]:
+def _lines(first: str | None, handle: Iterator[bytes]) -> Iterator[str]:
 	if first is not None:
 		yield first
 	for raw in handle:
@@ -173,7 +187,7 @@ def _lines(first: str | None, handle) -> Iterator[str]:
 
 def load_member(
 	conn: psycopg.Connection,
-	handle,
+	handle: Iterator[bytes],
 	table: str,
 	*,
 	member: str,
@@ -185,13 +199,20 @@ def load_member(
 	verify_columns(member, table, header)
 
 	staging = f"stg_{table}"
-	joined = ", ".join(_COLUMNS[table])
 	read = copied = 0
 
 	with conn.cursor() as cur:
-		cur.execute(f"CREATE TEMP TABLE {staging} (LIKE {table} INCLUDING DEFAULTS) ON COMMIT DROP")
+		cur.execute(
+			sql.SQL(
+				"CREATE TEMP TABLE {staging} (LIKE {table} INCLUDING DEFAULTS) ON COMMIT DROP"
+			).format(staging=sql.Identifier(staging), table=sql.Identifier(table))
+		)
 
-		with cur.copy(f"COPY {staging} ({joined}) FROM STDIN") as copy:
+		copy_statement = sql.SQL("COPY {staging} ({columns}) FROM STDIN").format(
+			staging=sql.Identifier(staging), columns=_identifiers(_COLUMNS[table])
+		)
+
+		with cur.copy(copy_statement) as copy:
 			for line in _lines(first_insert, handle):
 				if MEMBER_TABLES.get(dump.table_of(line)) != table:
 					continue
@@ -258,11 +279,14 @@ def load_dump(conn: psycopg.Connection, dump_path: Path) -> list[MemberResult]:
 def record(conn: psycopg.Connection, results: list[MemberResult]) -> None:
 	"""Append ingest_log rows."""
 	columns = [f.name for f in fields(MemberResult)]
-	placeholders = ", ".join(f"%({c})s" for c in columns)
 
 	with conn.cursor() as cur:
 		cur.executemany(
-			f"INSERT INTO ingest_log ({', '.join(columns)}) VALUES ({placeholders})",
+			sql.SQL("INSERT INTO ingest_log ({columns}) VALUES ({placeholders})").format(
+				columns=_identifiers(columns),
+				placeholders=sql.SQL(", ").join(sql.Placeholder(c) for c in columns),
+			),
 			[{c: getattr(r, c) for c in columns} for r in results],
 		)
+
 	conn.commit()

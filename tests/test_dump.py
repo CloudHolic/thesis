@@ -2,6 +2,7 @@
 
 from dataclasses import fields
 from datetime import datetime
+from typing import Any
 
 import pytest
 
@@ -9,7 +10,7 @@ from thesis.db import dump
 
 # osu_scores_mania_high column order, every value distinct so that an index off
 # by one shows up as a wrong field rather than a plausible number.
-SCORE_DUMP_ROW = [
+SCORE_DUMP_ROW: list[Any] = [
 	910000000001,  # 0  score_id
 	2001,  # 1  beatmap_id
 	3001,  # 2  user_id
@@ -32,8 +33,8 @@ SCORE_DUMP_ROW = [
 ]
 
 
-def beatmap_dump_row(**overrides):
-	row = [0] * 28
+def beatmap_dump_row(**overrides) -> list[Any]:
+	row: list[Any] = [0] * 28
 	row[0] = 2001  # beatmap_id
 	row[1] = 4001  # beatmapset_id
 	row[5] = "Another"  # version
@@ -160,6 +161,7 @@ def test_mania_accuracy_of_an_empty_play_is_zero():
 
 def test_score_row_maps_dump_columns_to_named_fields():
 	got = dump.to_score_row(SCORE_DUMP_ROW, in_top=False, in_random=True)
+	assert got is not None
 
 	assert got.score_id == 910000000001
 	assert got.user_id == 3001
@@ -174,6 +176,7 @@ def test_score_row_maps_dump_columns_to_named_fields():
 
 def test_score_row_maps_the_dump_judgement_names_to_mania_ones():
 	got = dump.to_score_row(SCORE_DUMP_ROW, in_top=True, in_random=False)
+	assert got is not None
 
 	assert got.count_max == 2  # countgeki
 	assert got.count_300 == 3
@@ -185,6 +188,7 @@ def test_score_row_maps_the_dump_judgement_names_to_mania_ones():
 
 def test_score_row_computes_accuracy_from_the_judgements():
 	got = dump.to_score_row(SCORE_DUMP_ROW, in_top=False, in_random=True)
+	assert got is not None
 
 	assert got.accuracy == pytest.approx(
 		dump.mania_accuracy(
@@ -217,6 +221,7 @@ def test_score_row_rejects_a_zero_score_id():
 
 def test_score_row_tuple_follows_the_field_order():
 	got = dump.to_score_row(SCORE_DUMP_ROW, in_top=False, in_random=True)
+	assert got is not None
 	names = [f.name for f in fields(dump.ScoreRow)]
 
 	assert names == [
@@ -246,6 +251,7 @@ def test_score_row_tuple_follows_the_field_order():
 
 def test_beatmap_row_maps_dump_columns_to_named_fields():
 	got = dump.to_beatmap_row(beatmap_dump_row())
+	assert got is not None
 
 	assert got.beatmap_id == 2001
 	assert got.beatmapset_id == 4001
@@ -284,11 +290,15 @@ def test_beatmap_row_rejects_a_zero_beatmap_id():
 
 @pytest.mark.parametrize(("diff_size", "expected"), [(4.0, 4), (7.0, 7), (6.7, 7), (10.2, 10)])
 def test_beatmap_row_rounds_the_key_count(diff_size, expected):
-	assert dump.to_beatmap_row(beatmap_dump_row(**{"13": diff_size})).keys == expected
+	got = dump.to_beatmap_row(beatmap_dump_row(**{"13": diff_size}))
+
+	assert got is not None
+	assert got.keys == expected
 
 
 def test_beatmap_row_tuple_follows_the_field_order():
 	got = dump.to_beatmap_row(beatmap_dump_row())
+	assert got is not None
 	names = [f.name for f in fields(dump.BeatmapRow)]
 
 	assert names == [

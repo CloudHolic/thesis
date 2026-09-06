@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from importlib import resources
+from typing import LiteralString, cast
 
 import psycopg
 from psycopg import sql
@@ -10,9 +11,10 @@ from psycopg import sql
 _FILES = ("schema.sql", "views.sql")
 
 
-def read_sql(name: str) -> str:
-	"""Text of one bundled .sql file."""
-	return resources.files(__package__).joinpath(name).read_text(encoding="utf-8")
+def read_sql(name: str) -> sql.SQL:
+	"""One bundled .sql file, as a statement."""
+	text = resources.files(__package__).joinpath(name).read_text(encoding="utf-8")
+	return sql.SQL(cast(LiteralString, text))
 
 
 def apply_all(conn: psycopg.Connection, *, schema: str = "public") -> None:
