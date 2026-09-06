@@ -62,3 +62,46 @@ cell_fraction = 0.1
 min_remaining = 2
 
 seed = 20260906
+
+[model]
+# Gauss-Hermite nodes for marginalizing theta. The pilot sweeps {11, 21, 31, 41}
+# and fixes one value from the sensitivity result.
+quadrature_nodes = 21
+
+# "x64" or "x32". x64 is the reference; x32 exists to answer whether a GPU run
+# can drop to single precision without moving the estimates.
+precision = "x64"
+
+[train]
+optimizer = "adam"
+learning_rate = 0.05
+steps = 3000
+
+# Stop when the loss improves by less than this for `patience` consecutive steps.
+tolerance = 1e-7
+patience = 50
+
+seed = 20260906
+
+[synth]
+# True z is drawn from a controlled range, not from the Normal (0, scale=10) prior: under
+# that prior exp(la) and exp(lambda) span e^{+-20}, and the fixture would be
+# meaningless. Ranges are moment-matched to the observed acc marginal; see the
+# derivation in the plan that introduced this section.
+la = [-0.7, 0.9]
+b = [1.5, 5.0]
+omega = [0.5, 3.5]
+gamma_0 = [-7.0, -5.0]
+gamma_1 = [2.5, 4.5]
+
+seed = 20260907
+
+[synth.ref]
+# The reference is MCMC over the joint (theta, z) posterior, so the fixture
+# has to stay small. Two conditions: the regime the paper reports recovery in,
+# and the regime our own data sits in.
+n_items = 12
+n_persons = 200
+chains = 4
+samples = 2000
+warmup = 1000
