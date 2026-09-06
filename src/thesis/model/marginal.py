@@ -7,12 +7,16 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
+from jax.lax import stop_gradient
 from jax.ops import segment_sum
 from jax.scipy.special import logsumexp
 
-from . import kernel
+from . import kernel, laplace
 from .quadrature import Quadrature
 from .transform import Tau
+
+_SQRT2 = 1.4142135623730951
+_LOG_SQRT_2PI = 0.9189385332046727
 
 
 class Responses(NamedTuple):
@@ -54,15 +58,14 @@ def split_by_branch(
 	)
 
 
-def log_marginal(tau: Tau, quad: Quadrature, responses: Responses) -> Array:
-	"""logsumexp_q [log w_q + sum_{i in O_p} log k(y_pi | theta_q, tau_i)], per person."""
-	grid = kernel.build_grid(tau, quad.nodes)
+def _log_likelihood(tau: Tau, responses: Responses, theta: Array) -> Array:
+	"""Sum of log k over each person's responses. `theta` is (n_persons, n_nodes)."""
 	n_persons = responses.n_persons
 
 	totals = segment_sum(
 		kernel.log_k_interior(
-			grid,
-			responses.interior_item,
+			kernel.gather(tau, responses.interior_item),
+			theta[responses.interior_person],
 			responses.interior_log_y,
 			responses.interior_log1m_y,
 		),
@@ -71,16 +74,40 @@ def log_marginal(tau: Tau, quad: Quadrature, responses: Responses) -> Array:
 		indices_are_sorted=True,
 	)
 	totals += segment_sum(
-		kernel.log_k_zero(grid, responses.zero_item),
+		kernel.log_k_zero(kernel.gather(tau, responses.zero_item), theta[responses.zero_person]),
 		responses.zero_person,
 		num_segments=n_persons,
 		indices_are_sorted=True,
 	)
 	totals += segment_sum(
-		kernel.log_k_one(grid, responses.one_item),
+		kernel.log_k_one(kernel.gather(tau, responses.one_item), theta[responses.one_person]),
 		responses.one_person,
 		num_segments=n_persons,
 		indices_are_sorted=True,
 	)
 
-	return logsumexp(quad.log_weights[None, :] + totals, axis=1)
+	return totals
+
+
+def log_marginal(tau: Tau, quad: Quadrature, responses: Responses) -> Array:
+	"""Marginal log-likelihood per person, by Gauss-Hermite centred on each posterior."""
+	mode, sd = laplace.fit(
+		lambda t: _log_likelihood(tau, responses, t[:, None])[:, 0] - 0.5 * jnp.square(t),
+		responses.n_persons,
+	)
+
+	# The exact integral does not depend on where the nodes sit,
+	# so the neglected path through the node positions is second order.
+	mode = stop_gradient(mode)
+	sd = stop_gradient(sd)
+
+	theta = mode[:, None] + _SQRT2 * sd[:, None] * quad.x[None, :]
+	log_phi = -0.5 * jnp.square(theta) - _LOG_SQRT_2PI
+
+	return jnp.log(_SQRT2 * sd) + logsumexp(
+		quad.log_w[None, :]
+		+ jnp.square(quad.x)[None, :]
+		+ log_phi
+		+ _log_likelihood(tau, responses, theta),
+		axis=1,
+	)

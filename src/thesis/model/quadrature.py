@@ -1,4 +1,4 @@
-"""Gauss-Hermite nodes and weights, transformed for a standard normal measure."""
+"""STandard Gauss-Hermite nodes and weights, left untransformed."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ from jax import Array
 
 
 class Quadrature(NamedTuple):
-	nodes: Array
-	log_weights: Array
+	"""The raw Hermite rule for the weight exp(-x^2)."""
+
+	x: Array
+	log_w: Array
 
 
 def gauss_hermite(n_nodes: int) -> Quadrature:
@@ -20,7 +22,4 @@ def gauss_hermite(n_nodes: int) -> Quadrature:
 		raise ValueError(f"n_nodes must be positive, got {n_nodes}")
 
 	x, w = np.polynomial.hermite.hermgauss(n_nodes)
-	return Quadrature(
-		nodes=jnp.asarray(np.sqrt(2.0) * x),
-		log_weights=jnp.asarray(np.log(w) - 0.5 * np.log(np.pi)),
-	)
+	return Quadrature(x=jnp.asarray(x), log_w=jnp.asarray(np.log(w)))
