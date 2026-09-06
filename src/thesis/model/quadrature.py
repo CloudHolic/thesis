@@ -10,17 +10,17 @@ from jax import Array
 
 
 class Quadrature(NamedTuple):
-    nodes: Array
-    log_weights: Array
+	nodes: Array
+	log_weights: Array
 
 
 def gauss_hermite(n_nodes: int) -> Quadrature:
-    """A rule whose weighted sum approximates E[f(theta)] under theta ~ Normal (0, 1)."""
-    if n_nodes < 1:
-        raise ValueError(f"n_nodes must be positive, get {n_nodes}")
+	"""A rule whose weighted sum approximates E[f(theta)] under theta ~ Normal (0, 1)."""
+	if n_nodes < 1:
+		raise ValueError(f"n_nodes must be positive, got {n_nodes}")
 
-    x, w = np.polynomial.hermite.hermgauss(n_nodes)
-    return Quadrature(
-        nodes=jnp.asarray(np.sqrt(2.0) * x),
-        log_weights=jnp.asarray(np.log(w) - 0.5 * np.log(np.pi))
-    )
+	x, w = np.polynomial.hermite.hermgauss(n_nodes)
+	return Quadrature(
+		nodes=jnp.asarray(np.sqrt(2.0) * x),
+		log_weights=jnp.asarray(np.log(w) - 0.5 * np.log(np.pi)),
+	)

@@ -194,7 +194,7 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 				cell_fraction=float(_require(raw, "data.holdout", "cell_fraction")),
 				min_remaining=int(_require(raw, "data.holdout", "min_remaining")),
 				seed=int(_require(raw, "data.holdout", "seed")),
-			)
+			),
 		),
 		raw=raw,
 	)
