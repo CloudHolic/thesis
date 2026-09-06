@@ -69,7 +69,7 @@ def sample_items(
 	"""Every response on a stratified draw of `n_items` items."""
 	allocation = allocate(item_counts_by_key(df, item_col=item_col), n_items=n_items, floor=floor)
 
-	items = df.select(item_col, "keys").unique(subset=item_col)
+	items = df.select(item_col, "keys").unique(subset=item_col).sort(item_col)
 	drawn = (
 		items.sample(fraction=1.0, shuffle=True, seed=seed)
 		.with_columns(pl.int_range(pl.len()).over("keys").alias("rank"))

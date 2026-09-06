@@ -40,12 +40,35 @@ class DiagnosticsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SampleConfig:
+	n_items: int
+	min_items_per_key: int
+	seed: int
+
+
+@dataclass(frozen=True, slots=True)
+class CoreConfig:
+	min_items: int
+	min_users: int
+
+
+@dataclass(frozen=True, slots=True)
+class HoldoutConfig:
+	cell_fraction: float
+	min_remaining: int
+	seed: int
+
+
+@dataclass(frozen=True, slots=True)
 class DataConfig:
 	response: str
 	pool: str
 	keys: tuple[int, ...]
 	link_threshold: int
 	diagnostics: DiagnosticsConfig
+	sample: SampleConfig
+	core: CoreConfig
+	holdout: HoldoutConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +181,20 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 					"kcore_min_users",
 				),
 			),
+			sample=SampleConfig(
+				n_items=int(_require(raw, "data.sample", "n_items")),
+				min_items_per_key=int(_require(raw, "data.sample", "min_items_per_key")),
+				seed=int(_require(raw, "data.sample", "seed")),
+			),
+			core=CoreConfig(
+				min_items=int(_require(raw, "data.core", "min_items")),
+				min_users=int(_require(raw, "data.core", "min_users")),
+			),
+			holdout=HoldoutConfig(
+				cell_fraction=float(_require(raw, "data.holdout", "cell_fraction")),
+				min_remaining=int(_require(raw, "data.holdout", "min_remaining")),
+				seed=int(_require(raw, "data.holdout", "seed")),
+			)
 		),
 		raw=raw,
 	)
