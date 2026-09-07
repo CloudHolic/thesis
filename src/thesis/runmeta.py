@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-TRACKED_PACKAGES = ("polars", "psycopg", "connectorx", "pyarrow")
+TRACKED_PACKAGES = ("polars", "psycopg", "connectorx", "pyarrow", "jax", "numpyro", "optax")
 
 
 def _versions() -> dict[str, str]:
