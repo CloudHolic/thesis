@@ -28,7 +28,13 @@ def draw_z(rng: np.random.Generator, n_items: int, ranges: np.ndarray) -> np.nda
 	if ranges.shape != (Z_DIM, 2):
 		raise ValueError(f"Ranges must be {(Z_DIM, 2)}, got {ranges.shape}")
 
-	return rng.uniform(ranges[:, 0], ranges[:, 1], size=(n_items, Z_DIM))
+	tau = rng.uniform(ranges[:, 0], ranges[:, 1], size=(n_items, Z_DIM))
+	if (tau[:, 0] <= 0.0).any():
+		raise ValueError("a must be positive")
+	if (tau[:, 4] <= tau[:, 3]).any():
+		raise ValueError("gamma_1 must exceed gamma_0")
+
+	return np.column_stack([np.log(tau[:, 0]), tau[:, 1], tau[:, 2], tau[:, 3], np.log(tau[:, 4] - tau[:, 3])])
 
 
 def draw_responses(

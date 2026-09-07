@@ -12,6 +12,7 @@ from jax.ops import segment_sum
 from jax.scipy.special import logsumexp
 
 from . import kernel, laplace
+from .laplace import Center
 from .quadrature import Quadrature
 from .transform import Tau
 
@@ -89,25 +90,33 @@ def _log_likelihood(tau: Tau, responses: Responses, theta: Array) -> Array:
 	return totals
 
 
-def log_marginal(tau: Tau, quad: Quadrature, responses: Responses) -> Array:
-	"""Marginal log-likelihood per person, by Gauss-Hermite centred on each posterior."""
-	mode, sd = laplace.fit(
+def find_center(tau: Tau, responses: Responses) -> Center:
+	"""Where each person's adaptive nodes belong, and who fell back to (0, 1)."""
+	return laplace.fit(
 		lambda t: _log_likelihood(tau, responses, t[:, None])[:, 0] - 0.5 * jnp.square(t),
 		responses.n_persons,
 	)
 
-	# The exact integral does not depend on where the nodes sit,
-	# so the neglected path through the node positions is second order.
-	mode = stop_gradient(mode)
-	sd = stop_gradient(sd)
+
+def log_marginal(
+	tau: Tau, quad: Quadrature, responses: Responses, *, center: Center | None = None
+) -> Array:
+	"""Marginal log-likelihood per person, by Gauss-Hermite centred on each posterior."""
+	found = find_center(tau, responses) if center is None else center
+	mode = stop_gradient(found.mode)
+	sd = stop_gradient(found.sd)
 
 	theta = mode[:, None] + _SQRT2 * sd[:, None] * quad.x[None, :]
-	log_phi = -0.5 * jnp.square(theta) - _LOG_SQRT_2PI
+
+	# x^2 + log phi(theta) with the two canceling x^2 terms expanded apart,
+	# so that at sd = 1 they annihilate exactly rather than losing digits to subtraction.
+	weight = (
+		jnp.square(quad.x)[None, :] * (1.0 - jnp.square(sd)[:, None])
+		- _SQRT2 * (sd * mode)[:, None] * quad.x[None, :]
+		- 0.5 * jnp.square(mode)[:, None]
+		- _LOG_SQRT_2PI
+	)
 
 	return jnp.log(_SQRT2 * sd) + logsumexp(
-		quad.log_w[None, :]
-		+ jnp.square(quad.x)[None, :]
-		+ log_phi
-		+ _log_likelihood(tau, responses, theta),
-		axis=1,
+		quad.log_w[None, :] + weight + _log_likelihood(tau, responses, theta), axis=1
 	)

@@ -88,7 +88,7 @@ seed = 20260906
 # that prior exp(la) and exp(lambda) span e^{+-20}, and the fixture would be
 # meaningless. Ranges are moment-matched to the observed acc marginal; see the
 # derivation in the plan that introduced this section.
-la = [-0.7, 0.9]
+a = [0.5, 2.5]
 b = [1.5, 5.0]
 omega = [0.5, 3.5]
 gamma_0 = [-7.0, -5.0]
