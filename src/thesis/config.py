@@ -60,6 +60,42 @@ class HoldoutConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelConfig:
+	quadrature_nodes: int
+	precision: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrainConfig:
+	optimizer: str
+	learning_rate: float
+	steps: int
+	tolerance: float
+	patience: int
+	seed: int
+
+
+@dataclass(frozen=True, slots=True)
+class SynthRefConfig:
+	n_items: int
+	n_persons: int
+	chains: int
+	samples: int
+	warmup: int
+
+
+@dataclass(frozen=True, slots=True)
+class SynthConfig:
+	a: tuple[float, float]
+	b: tuple[float, float]
+	omega: tuple[float, float]
+	gamma_0: tuple[float, float]
+	gamma_1: tuple[float, float]
+	seed: int
+	ref: SynthRefConfig
+
+
+@dataclass(frozen=True, slots=True)
 class DataConfig:
 	response: str
 	pool: str
@@ -77,6 +113,9 @@ class Config:
 	db: DbConfig
 	paths: PathsConfig
 	data: DataConfig
+	model: ModelConfig
+	train: TrainConfig
+	synth: SynthConfig
 	raw: dict[str, Any]
 
 	@property
@@ -142,6 +181,21 @@ def _ints(value: Any, section: str, key: str) -> tuple[int, ...]:
 		raise ConfigError(f"[{section}] {key} must contain only integers") from None
 
 
+def _pair(value: Any, section: str, key: str) -> tuple[float, float]:
+	if not isinstance(value, list) or len(value) != 2:
+		raise ConfigError(f"[{section}] {key} must be a list of two numbers")
+
+	try:
+		low, high = (float(v) for v in value)
+	except (TypeError, ValueError):
+		raise ConfigError(f"[{section}] {key} must contain only numbers") from None
+
+	if low >= high:
+		raise ConfigError(f"[{section}] {key} must be increasing, got {value}")
+
+	return low, high
+
+
 def _build(path: Path, raw: dict[str, Any]) -> Config:
 	response = _require(raw, "data", "response")
 	if response not in domain.VIEWS:
@@ -194,6 +248,33 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 				cell_fraction=float(_require(raw, "data.holdout", "cell_fraction")),
 				min_remaining=int(_require(raw, "data.holdout", "min_remaining")),
 				seed=int(_require(raw, "data.holdout", "seed")),
+			),
+		),
+		model=ModelConfig(
+			quadrature_nodes=int(_require(raw, "model", "quadrature_nodes")),
+			precision=str(_require(raw, "model", "precision")),
+		),
+		train=TrainConfig(
+			optimizer=str(_require(raw, "train", "optimizer")),
+			learning_rate=float(_require(raw, "train", "learning_rate")),
+			steps=int(_require(raw, "train", "steps")),
+			tolerance=float(_require(raw, "train", "tolerance")),
+			patience=int(_require(raw, "train", "patience")),
+			seed=int(_require(raw, "train", "seed")),
+		),
+		synth=SynthConfig(
+			a=_pair(_require(raw, "synth", "a"), "synth", "a"),
+			b=_pair(_require(raw, "synth", "b"), "synth", "b"),
+			omega=_pair(_require(raw, "synth", "omega"), "synth", "omega"),
+			gamma_0=_pair(_require(raw, "synth", "gamma_0"), "synth", "gamma_0"),
+			gamma_1=_pair(_require(raw, "synth", "gamma_1"), "synth", "gamma_1"),
+			seed=int(_require(raw, "synth", "seed")),
+			ref=SynthRefConfig(
+				n_items=int(_require(raw, "synth.ref", "n_items")),
+				n_persons=int(_require(raw, "synth.ref", "n_persons")),
+				chains=int(_require(raw, "synth.ref", "chains")),
+				samples=int(_require(raw, "synth.ref", "samples")),
+				warmup=int(_require(raw, "synth.ref", "warmup")),
 			),
 		),
 		raw=raw,
