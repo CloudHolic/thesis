@@ -34,7 +34,9 @@ def draw_z(rng: np.random.Generator, n_items: int, ranges: np.ndarray) -> np.nda
 	if (tau[:, 4] <= tau[:, 3]).any():
 		raise ValueError("gamma_1 must exceed gamma_0")
 
-	return np.column_stack([np.log(tau[:, 0]), tau[:, 1], tau[:, 2], tau[:, 3], np.log(tau[:, 4] - tau[:, 3])])
+	return np.column_stack(
+		[np.log(tau[:, 0]), tau[:, 1], tau[:, 2], tau[:, 3], np.log(tau[:, 4] - tau[:, 3])]
+	)
 
 
 def draw_responses(
