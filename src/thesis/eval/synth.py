@@ -63,7 +63,7 @@ def draw_responses(
 
 def full_cross(n_items: int, n_persons: int) -> tuple[np.ndarray, np.ndarray]:
 	"""Person-sorted indices for every person answering every item."""
-	return (np.tile(np.arange(n_items), n_persons), np.repeat(np.arange(n_persons), n_items))
+	return np.tile(np.arange(n_items), n_persons), np.repeat(np.arange(n_persons), n_items)
 
 
 def dataset_cells(path: Path) -> tuple[np.ndarray, np.ndarray, int, int]:
