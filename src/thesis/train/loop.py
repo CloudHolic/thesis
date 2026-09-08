@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
@@ -17,6 +18,7 @@ from jax import Array
 class Fit:
 	z: np.ndarray
 	losses: np.ndarray
+	seconds: np.ndarray
 	best_loss: float
 	steps: int
 	converged: bool
@@ -65,12 +67,14 @@ def run(
 		return cast(Array, optax.apply_updates(z, updates)), state
 
 	losses: list[float] = []
+	seconds: list[float] = []
 	best_loss = np.inf
 	best_z = z
 	stalled = 0
 	converged = False
 
 	for step in range(steps):
+		mark = time.monotonic()
 		loss, grad = value_and_grad(z)
 		value = float(loss)
 		if not np.isfinite(value):
@@ -83,13 +87,16 @@ def run(
 			stalled += 1
 			if stalled >= patience:
 				converged = True
+				seconds.append(time.monotonic() - mark)
 				break
 
 		z, state = update(z, state, grad)
+		seconds.append(time.monotonic() - mark)
 
 	return Fit(
 		z=np.asarray(best_z),
 		losses=np.asarray(losses),
+		seconds=np.asarray(seconds),
 		best_loss=float(best_loss),
 		steps=len(losses),
 		converged=converged,
