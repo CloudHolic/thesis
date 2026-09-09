@@ -98,7 +98,7 @@ def run(
 		seconds.append(time.monotonic() - mark)
 
 	return Fit(
-		params=jax.tree.map(np.asarray, best),
+		params=best,
 		losses=np.asarray(losses),
 		seconds=np.asarray(seconds),
 		best_loss=float(best_loss),
