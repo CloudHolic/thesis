@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -16,7 +16,9 @@ from jax import Array
 
 @dataclass(frozen=True, slots=True)
 class Fit:
-	z: np.ndarray
+	"""The best point found, and the trace that got there. `params` is a pytree."""
+
+	params: Any
 	losses: np.ndarray
 	seconds: np.ndarray
 	best_loss: float
@@ -45,44 +47,46 @@ def build(name: str, learning_rate: float) -> optax.GradientTransformation:
 
 
 def run(
-	loss_fn: Callable[[Array], Array],
-	z0: np.ndarray,
+	loss_fn: Callable[[Any, Array], Array],
+	params: Any,
 	*,
 	optimizer: optax.GradientTransformation,
 	steps: int,
 	tolerance: float,
 	patience: int,
+	key: Array,
 ) -> Fit:
-	"""Minimizes `loss_fn` from `z0`, returning the best point found."""
+	"""Minimizes `loss_fn` from `params`, returning the best point found."""
 	if patience < 1:
 		raise ValueError(f"patience must be at least 1, got {patience}")
 
-	z = jnp.asarray(z0)
-	state = optimizer.init(z)
+	params = jax.tree.map(jnp.asarray, params)
+	state = optimizer.init(params)
 	value_and_grad = jax.jit(jax.value_and_grad(loss_fn))
 
 	@jax.jit
-	def update(z: Array, state: optax.OptState, grad: Array) -> tuple[Array, optax.OptState]:
-		updates, state = optimizer.update(grad, state, z)
-		return cast(Array, optax.apply_updates(z, updates)), state
+	def update(params: Any, state: optax.OptState, grad: Any) -> tuple[Any, optax.OptState]:
+		updates, state = optimizer.update(grad, state, params)
+		return optax.apply_updates(params, updates), state
 
 	losses: list[float] = []
 	seconds: list[float] = []
 	best_loss = np.inf
-	best_z = z
+	best = params
 	stalled = 0
 	converged = False
 
 	for step in range(steps):
 		mark = time.monotonic()
-		loss, grad = value_and_grad(z)
+		key, subkey = jax.random.split(key)
+		loss, grad = value_and_grad(params, subkey)
 		value = float(loss)
 		if not np.isfinite(value):
 			raise FloatingPointError(f"loss became {value} at step {step}")
 		losses.append(value)
 
 		if best_loss - value > tolerance:
-			best_loss, best_z, stalled = value, z, 0
+			best_loss, best, stalled = value, params, 0
 		else:
 			stalled += 1
 			if stalled >= patience:
@@ -90,11 +94,11 @@ def run(
 				seconds.append(time.monotonic() - mark)
 				break
 
-		z, state = update(z, state, grad)
+		params, state = update(params, state, grad)
 		seconds.append(time.monotonic() - mark)
 
 	return Fit(
-		z=np.asarray(best_z),
+		params=jax.tree.map(np.asarray, best),
 		losses=np.asarray(losses),
 		seconds=np.asarray(seconds),
 		best_loss=float(best_loss),

@@ -25,3 +25,30 @@ def quantities(tau: np.ndarray) -> dict[str, np.ndarray]:
 	out["omega"] = tau[:, 2]
 
 	return out
+
+
+def responder_range(
+	item_index: np.ndarray, person_index: np.ndarray, theta: np.ndarray, n_items: int
+) -> tuple[np.ndarray, np.ndarray]:
+	"""The theta span of the people who answered each item."""
+	low = np.full(n_items, np.inf)
+	high = np.full(n_items, -np.inf)
+	np.minimum.at(low, item_index, theta[person_index])
+	np.maximum.at(high, item_index, theta[person_index])
+
+	return low, high
+
+
+def extrapolated(
+	quantities: dict[str, np.ndarray], low: np.ndarray, high: np.ndarray
+) -> dict[str, np.ndarray]:
+	"""Which thresholds fall outside the span they were measured on.
+
+	A b*(y) beyond the ability of everyone who played the item is an extrapolation of
+	the fitted curve, not something the responses witnessed.
+	"""
+	return {
+		name: (values < low) | (values > high)
+		for name, values in quantities.items()
+		if name.startswith("b*")
+	}

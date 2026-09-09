@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
 from scipy.special import expit
 
+from thesis.data import Dataset
 from thesis.model.likelihood import Z_DIM
 
 
@@ -74,15 +74,10 @@ def full_cross(n_items: int, n_persons: int) -> tuple[np.ndarray, np.ndarray]:
 	return np.tile(np.arange(n_items), n_persons), np.repeat(np.arange(n_persons), n_items)
 
 
-def dataset_cells(path: Path) -> tuple[np.ndarray, np.ndarray, int, int]:
-	"""Training cells of a real dataset."""
-	data = np.load(path)
-	offsets = data["offsets"]
-	person = np.repeat(np.arange(offsets.size - 1), np.diff(offsets))
-	keep = ~data["held_out"].astype(bool)
-	item = data["item_index"]
-
-	return item[keep], person[keep], int(item.max()) + 1, offsets.size - 1
+def training_cells(data: Dataset) -> tuple[np.ndarray, np.ndarray]:
+	"""The cells a fit train on, in person order, so throughput carries over to fitting."""
+	keep = ~data.held_out
+	return data.item_index[keep], data.person_index()[keep]
 
 
 def build(

@@ -33,14 +33,3 @@ def compare(
 		}
 		for name in truth
 	}
-
-
-def render(table: dict[str, dict[str, float]], title: str) -> str:
-	"""One block of the comparison table, for the run log and the artifact."""
-	lines = [f"{title:>12} {'bias':>9} {'rmse':>9} {'spearman':>9}"]
-	lines += [
-		f"{name:>12} {row['bias']:9.4f} {row['rmse']:9.4f} {row['spearman']:9.4f}"
-		for name, row in table.items()
-	]
-
-	return "\n".join(lines)

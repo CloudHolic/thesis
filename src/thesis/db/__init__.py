@@ -4,7 +4,7 @@ The MySQL dump parser is an implementation detail of ingestion and is not re-exp
 """
 
 from .apply import apply_all
-from .ingest import DumpSchemaError, MemberResult, load_dump, record
+from .ingest import DumpSchemaError, MemberResult, load_dump, pool_flags, record
 from .query import responses
 
 __all__ = [
@@ -12,6 +12,7 @@ __all__ = [
 	"MemberResult",
 	"apply_all",
 	"load_dump",
+	"pool_flags",
 	"record",
 	"responses",
 ]
