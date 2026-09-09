@@ -1,21 +1,15 @@
-"""The recovery table."""
+"""Comparing two sets of item estimates on the axes the pilot reports."""
 
 from __future__ import annotations
 
 import numpy as np
 from scipy.stats import spearmanr
 
-from .reference import Posterior
-
-ACCURACIES: tuple[float, ...] = (0.9, 0.95, 0.98)
-
-
-def tau_from_z(z: np.ndarray) -> np.ndarray:
-	"""(a, b, omega, gamma_0, gamma_1) from the unconstrained coordinates."""
-	return np.column_stack([np.exp(z[:, 0]), z[:, 1], z[:, 2], z[:, 3], z[:, 3] + np.exp(z[:, 4])])
+from thesis.references.zoi import Posterior
 
 
 def tau_from_posterior(post: Posterior) -> np.ndarray:
+	"""(a, b, omega, gamma_0, gamma_1) from the reference posterior means."""
 	return np.column_stack(
 		[
 			np.exp(post.mean["log_a"]),
@@ -25,16 +19,6 @@ def tau_from_posterior(post: Posterior) -> np.ndarray:
 			post.mean["gamma_1"],
 		]
 	)
-
-
-def quantities(tau: np.ndarray) -> dict[str, np.ndarray]:
-	"""What the model reports."""
-	a = tau[:, 0]
-	out = {f"b*({y:.2f})": (np.log(y / (1.0 - y)) - tau[:, 1]) / a for y in ACCURACIES}
-	out["gamma_1/a"] = tau[:, 4] / a
-	out["gamma_0/a"] = tau[:, 3] / a
-	out["omega"] = tau[:, 2]
-	return out
 
 
 def compare(
@@ -52,7 +36,7 @@ def compare(
 
 
 def render(table: dict[str, dict[str, float]], title: str) -> str:
-	"""One block of the recovery table, for the run log."""
+	"""One block of the comparison table, for the run log and the artifact."""
 	lines = [f"{title:>12} {'bias':>9} {'rmse':>9} {'spearman':>9}"]
 	lines += [
 		f"{name:>12} {row['bias']:9.4f} {row['rmse']:9.4f} {row['spearman']:9.4f}"

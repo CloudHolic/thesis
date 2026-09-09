@@ -33,27 +33,39 @@ def response_shape(values: np.ndarray) -> dict[str, float]:
 def main() -> None:
 	ap = argparse.ArgumentParser(description=__doc__)
 	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
-	ap.add_argument("--response", default=None, choices=sorted(domain.VIEWS))
 	ap.add_argument("--pool", default=None, choices=list(domain.POOLS))
 	args = ap.parse_args()
 
 	cfg = config.load(args.config)
-	response = args.response or cfg.data.response
 	pool = args.pool or cfg.data.pool
+	names = sorted(domain.VIEWS)
+	first, *rest = names
 
 	started = time.monotonic()
-	df = query.responses(dsn=cfg.db.dsn, response=response, keys=cfg.data.keys, pool=pool)
+	frames = {
+		name: query.responses(
+			dsn=cfg.db.dsn, response=name, keys=cfg.data.keys, pool=pool
+		).with_columns(
+			# An item is a (beatmap, rate_group) pair, not a beatmap.
+			(pl.col("beatmap_id").cast(pl.Utf8) + "|" + pl.col("rate_group")).alias("item")
+		)
+		for name in names
+	}
 	query_seconds = time.monotonic() - started
-	if df.height == 0:
-		raise SystemExit(f"no rows for response={response} pool={pool}")
+	for name, frame in frames.items():
+		if frame.height == 0:
+			raise SystemExit(f"no rows for response={name} pool={pool}")
 
-	# An item is a (beatmap, rate_group) pair, not a beatmap.
-	df = df.with_columns(
-		(pl.col("beatmap_id").cast(pl.Utf8) + "|" + pl.col("rate_group")).alias("item")
-	)
+	cells = {
+		name: frame.select("user_id", "item").sort("user_id", "item")
+		for name, frame in frames.items()
+	}
+	for name in rest:
+		if not cells[first].equals(cells[name]):
+			raise SystemExit(f"[{first}] and [{name}] do not cover the same cells")
 
 	core = kcore.filter_kcore(
-		df, min_item=cfg.data.core.min_items, min_user=cfg.data.core.min_users
+		frames[first], min_item=cfg.data.core.min_items, min_user=cfg.data.core.min_users
 	)
 	allocation = sample.allocate(
 		sample.item_counts_by_key(core),
@@ -67,7 +79,23 @@ def main() -> None:
 		floor=cfg.data.sample.min_items_per_key,
 	).filter(pl.len().over("user_id") >= cfg.data.core.min_users)
 
-	data = dataset.build(drawn)
+	cell_keys = drawn.select("user_id", "item", "beatmap_id", "rate_group", "keys")
+	built = {}
+	for name in names:
+		frame = cell_keys.join(
+			frames[name].select("user_id", "item", "response"), on=["user_id", "item"]
+		)
+		if frame.height != drawn.height:
+			raise SystemExit(f"[{name}] does not cover every drawn cell exactly once")
+		built[name] = dataset.build(frame)
+
+	data = built[first]
+	for name in rest:
+		if not np.array_equal(data.offsets, built[name].offsets) or not np.array_equal(
+			data.item_index, built[name].item_index
+		):
+			raise SystemExit(f"[{name}] built a different layout than [{first}]")
+
 	held_out = holdout.cell_mask(
 		data.item_index,
 		data.person_index(),
@@ -96,46 +124,47 @@ def main() -> None:
 	}
 	item_spread = spread(per_item)
 	person_spread = spread(per_person)
-	shape = response_shape(data.response)
-
-	cfg.ensure_dirs()
-	out = cfg.paths.artifacts / f"pilot_{response}_{pool}.npz"
-	dataset.save(data, held_out, out)
-	runmeta.write(
-		out,
-		runmeta.build(
-			script="04_build_dataset.py",
-			config_raw=cfg.raw,
-			extra={
-				"effective": {"response": response, "pool": pool},
-				"query_seconds": round(query_seconds, 1),
-				"core": {"items": int(core["item"].n_unique()), "obs": core.height},
-				"allocation": {str(k): v for k, v in allocation.items()},
-				"dataset": summary,
-				"responses_per_item": item_spread,
-				"responses_per_person": person_spread,
-				"response_shape": shape,
-				"components": {
-					"n_components": connectivity.n_components,
-					"largest_share_of_responses": connectivity.largest_share_of_responses,
-					"items_by_key_outside": connectivity.items_by_key_outside,
-				},
-			},
-		),
-	)
+	shapes = {name: response_shape(built[name].response) for name in names}
 
 	print(f"core     {core['item'].n_unique():,} items, {core.height:,} responses")
 	print(f"draw     {allocation}")
 	print(
 		f"dataset  {summary['n_items']:,} items, {summary['n_persons']:,} persons, "
-		f"{summary['n_obs']:,} responses"
+		f"{summary['n_obs']:,} responses, shared by {', '.join(names)}"
 	)
 	print(f"held out {summary['held_out']:,} of {summary['held_out_requested']:,} requested")
 	print(f"per item    {item_spread}")
 	print(f"per person  {person_spread}")
 	print(f"components  {connectivity.n_components}")
-	print(f"response    {shape}")
-	print(f"\nwrote {out}")
+
+	cfg.ensure_dirs()
+	for name in names:
+		out = cfg.paths.artifacts / f"pilot_{name}_{pool}.npz"
+		dataset.save(built[name], held_out, out)
+		runmeta.write(
+			out,
+			runmeta.build(
+				script="04_build_dataset.py",
+				config_raw=cfg.raw,
+				extra={
+					"effective": {"response": name, "pool": pool, "shares_cells_with": names},
+					"query_seconds": round(query_seconds, 1),
+					"core": {"items": int(core["item"].n_unique()), "obs": core.height},
+					"allocation": {str(k): v for k, v in allocation.items()},
+					"dataset": summary,
+					"responses_per_item": item_spread,
+					"responses_per_person": person_spread,
+					"response_shape": shapes[name],
+					"components": {
+						"n_components": connectivity.n_components,
+						"largest_share_of_responses": connectivity.largest_share_of_responses,
+						"items_by_key_outside": connectivity.items_by_key_outside,
+					},
+				},
+			),
+		)
+		print(f"response {name:>5}  {shapes[name]}")
+		print(f"wrote {out}")
 
 
 if __name__ == "__main__":

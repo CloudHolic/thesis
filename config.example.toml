@@ -1,80 +1,52 @@
 # Copy this file to config.toml and fill in the values.
-#
-#   config.toml is gitignored: it holds the database credentials and every
-#   value not fixed by the osu! domain. Nothing outside it is tunable.
-#
-#   Loading order: --config PATH, then $THESIS_CONFIG, then <repo root>/config.toml.
-#   A missing file is an error, never a silent fallback to these example values.
-#
-#   Sections for the model and training stages are added by the plans that
-#   introduce their consumers. A knob with no reader does not belong here.
 
 [db]
 # PostgreSQL connection string for the osu! dump database.
 dsn = "postgresql://USER:PASSWORD@HOST:5432/thesis"
 
 [paths]
-# Where every derived artifact is written. Relative paths resolve against the
-# repository root. On Colab, point this at the mounted Drive folder.
+# Where every derived artifact is written, in subdirectories per stage. Relative
+# paths resolve against the repository root. On Colab, point this at Drive.
 artifacts = "artifacts"
 
 [data]
-# Which response view to read and which dump pool to keep.
+# Which response variable and dump pool the fits default to. Both response
+# variables are built together and share the same cells.
 response = "acc"      # "acc" | "score"
 pool = "random"       # "random" | "top" | "all"
 
-# Every keymode present in the dumps. Items are selected by response density in
-# the k-core sweep, not by key count.
+# Every keymode present in the dumps. Items are selected by response density,
+# not by key count.
 keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18]
 
-# A user counts as linking the keymodes when they have at least this many
-# responses in every keymode listed above.
-link_threshold = 10
-
-[data.diagnostics]
-# Thresholds swept by 02_linking_report.py.
-link_thresholds = [1, 2, 5, 10, 20, 50]
-
-# Grid swept by 03_kcore_sweep.py: minimum responses per item and per person.
-kcore_min_items = [5, 10, 20, 50, 100]
-kcore_min_users = [5, 10, 20, 50]
-
-[data.sample]
-# The pilot fits a stratified draw from the core rather than the whole thing.
-# Raise this once synthetic recovery and the ID baseline holds up.
+# How many items the pilot draws, stratified by keymode.
 n_items = 3000
+
+# k-core floors, in responses. Not counts of items or users.
+min_responses_per_item = 100
+min_responses_per_user = 2
 
 # Items per keymode are allocated proportionally, but never below this.
 min_items_per_key = 1
 
-seed = 20260906
-
-[data.core]
-# Thresholds the pilot dataset is drawn from.
-min_items = 100
-min_users = 2
-
-[data.holdout]
 # Held-out cells are what makes the ID-versus-feature comparison mean anything.
-cell_fraction = 0.1
+# No item and no person may drop below `holdout_min_remaining` training responses.
+holdout_fraction = 0.1
+holdout_min_remaining = 2
 
-# No item and no person may drop below these many training responses.
-min_remaining = 2
-
-seed = 20260906
+# Separate streams: merging them would change the draw and invalidate every
+# artifact built from the current dataset.
+sample_seed = 20260906
+holdout_seed = 20260906
 
 [model]
-# Gauss-Hermite nodes for marginalizing theta. The pilot sweeps {11, 21, 31, 41} and
-# fixes one value from the sensitivity result.
+# Gauss-Hermite nodes for marginalizing theta, and the float width. The nodes are
+# placed adaptively on each person's posterior, not on the prior.
 quadrature_nodes = 21
-
-# "x64" or "x32". x64 is the reference; x32 exists to answer whether a GPU run can
-# drop to single precision without moving the estimates.
-precision = "x64"
+precision = "x64"     # "x64" | "x32"
 
 [train]
-# Any optax optimizer name, and its step size. Not settled: 07a is the stage that
-# finds out whether Adam handles this goal.
+# Any optax optimizer name, and its step size.
 optimizer = "adam"
 learning_rate = 0.05
 steps = 3000
@@ -87,25 +59,8 @@ patience = 50
 
 seed = 20260906
 
-[synth]
-# True item parameters, drawn uniformly in tau and mapped to z by the generator.
-# Moment-matched to the observed acc marginal: E[y] = sigmoid(b),
-# phi = 2 exp(omega/2) cosh(eta/2), P(y=1) = 1 - sigmoid(gamma_1). gamma_0 sits where
-# the data cannot speak -- there are no zero responses, so it is a one-sided ridge
-# and the fixture has to reproduce that.
-a = [0.5, 2.5]
-b = [1.5, 5.0]
-omega = [0.5, 3.5]
-gamma_0 = [-7.0, -5.0]
-gamma_1 = [2.5, 4.5]
-
-seed = 20260907
-
-[synth.ref]
-# The reference is MCMC over the joint (theta, z) posterior, so this fixture stays
-# small enough for NUTS.
-n_items = 12
-n_persons = 200
+[reference]
+# NUTS over the paper's model, which samples theta instead of marginalizing it.
 chains = 4
 samples = 1000
 warmup = 1000

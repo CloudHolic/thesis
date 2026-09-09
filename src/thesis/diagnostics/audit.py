@@ -9,8 +9,8 @@ import numpy as np
 from scipy.integrate import quad
 from scipy.stats import norm
 
-from thesis.model import kernel, laplace, marginal, quadrature
-from thesis.model.transform import Tau
+from thesis.model import likelihood
+from thesis.model.likelihood import Tau
 
 GRID_LIMIT = 8.0
 GRID_POINTS = 4001
@@ -28,19 +28,19 @@ def log_integrand(tau: Tau, items: np.ndarray, ys: np.ndarray, thetas: np.ndarra
 	if interior.any():
 		y = ys[interior]
 		total += np.asarray(
-			kernel.log_k_interior(
-				kernel.gather(tau, jnp.asarray(items[interior])),
+			likelihood.log_k_interior(
+				likelihood.gather(tau, jnp.asarray(items[interior])),
 				block(interior),
 				jnp.asarray(np.log(y)),
 				jnp.asarray(np.log1p(-y)),
 			)
 		).sum(axis=0)
 
-	for mask, fn in ((ys == 0.0, kernel.log_k_zero), (ys == 1.0, kernel.log_k_one)):
+	for mask, fn in ((ys == 0.0, likelihood.log_k_zero), (ys == 1.0, likelihood.log_k_one)):
 		if mask.any():
-			total += np.asarray(fn(kernel.gather(tau, jnp.asarray(items[mask])), block(mask))).sum(
-				axis=0
-			)
+			total += np.asarray(
+				fn(likelihood.gather(tau, jnp.asarray(items[mask])), block(mask))
+			).sum(axis=0)
 
 	return total
 
@@ -70,13 +70,13 @@ def exact(tau: Tau, items: np.ndarray, ys: np.ndarray) -> tuple[float, float, fl
 
 def estimate(tau: Tau, items: np.ndarray, ys: np.ndarray, n_nodes: int, *, adaptive: bool) -> float:
 	"""Out log marginal for one person, with the nodes solved for or pinned at (0, 1)."""
-	split = marginal.split_by_branch(items, np.zeros(items.size, dtype=int), ys, 1)
+	split = likelihood.split_by_branch(items, np.zeros(items.size, dtype=int), ys, 1)
 	center = (
 		None
 		if adaptive
-		else laplace.Center(mode=jnp.zeros(1), sd=jnp.ones(1), usable=jnp.ones(1, dtype=bool))
+		else likelihood.Center(mode=jnp.zeros(1), sd=jnp.ones(1), usable=jnp.ones(1, dtype=bool))
 	)
 
 	return float(
-		marginal.log_marginal(tau, quadrature.gauss_hermite(n_nodes), split, center=center)[0]
+		likelihood.log_marginal(tau, likelihood.gauss_hermite(n_nodes), split, center=center)[0]
 	)

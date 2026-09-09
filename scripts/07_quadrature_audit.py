@@ -43,14 +43,8 @@ def main() -> None:
 	standard = np.empty((len(RESPONSE_COUNTS), len(NODE_COUNTS)))
 	adaptive = np.empty_like(standard)
 
-	print(
-		f"{'n_resp':>7} {'post sd':>8} "
-		+ " ".join(f"{'Q=' + str(q):^19}" for q in NODE_COUNTS)
-	)
-	print(
-		f"{'':>7} {'':>8} "
-		+ " ".join(f"{'standard':>9} {'adaptive':>9}" for _ in NODE_COUNTS)
-	)
+	print(f"{'n_resp':>7} {'post sd':>8} " + " ".join(f"{'Q=' + str(q):^19}" for q in NODE_COUNTS))
+	print(f"{'':>7} {'':>8} " + " ".join(f"{'standard':>9} {'adaptive':>9}" for _ in NODE_COUNTS))
 	for row, n_resp in enumerate(RESPONSE_COUNTS):
 		items = rng.integers(0, n_items, size=n_resp)
 		ys = synth.draw_responses(
@@ -58,17 +52,12 @@ def main() -> None:
 		)
 		truth, modes[row], sds[row] = audit.exact(tau, items, ys)
 		for col, nodes in enumerate(NODE_COUNTS):
-			standard[row, col] = abs(
-				audit.estimate(tau, items, ys, nodes, adaptive=False) - truth
-			)
-			adaptive[row, col] = abs(
-				audit.estimate(tau, items, ys, nodes, adaptive=True) - truth
-			)
+			standard[row, col] = abs(audit.estimate(tau, items, ys, nodes, adaptive=False) - truth)
+			adaptive[row, col] = abs(audit.estimate(tau, items, ys, nodes, adaptive=True) - truth)
 		print(
 			f"{n_resp:>7} {sds[row]:8.4f} "
 			+ " ".join(
-				f"{standard[row, c]:9.2e} {adaptive[row, c]:9.2e}"
-				for c in range(len(NODE_COUNTS))
+				f"{standard[row, c]:9.2e} {adaptive[row, c]:9.2e}" for c in range(len(NODE_COUNTS))
 			)
 		)
 

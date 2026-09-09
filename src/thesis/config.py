@@ -13,9 +13,11 @@ from . import domain
 DEFAULT_FILENAME = "config.toml"
 EXAMPLE_FILENAME = "config.example.toml"
 
-# Assumes a source checkout or an editable installation, which is how all three environments
-# install this package. THESIS_CONFIG overrides it when that fails.
+# Assumes a source checkout or an editable installation, which is how all three
+# environments install this package. THESIS_CONFIG overrides it when that fails.
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ARTIFACT_DIRS = ("dataset", "charts", "features", "diagnostics", "fits", "difficulty")
 
 
 class ConfigError(RuntimeError):
@@ -33,30 +35,18 @@ class PathsConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class DiagnosticsConfig:
-	link_thresholds: tuple[int, ...]
-	kcore_min_items: tuple[int, ...]
-	kcore_min_users: tuple[int, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class SampleConfig:
+class DataConfig:
+	response: str
+	pool: str
+	keys: tuple[int, ...]
 	n_items: int
+	min_responses_per_item: int
+	min_responses_per_user: int
 	min_items_per_key: int
-	seed: int
-
-
-@dataclass(frozen=True, slots=True)
-class CoreConfig:
-	min_items: int
-	min_users: int
-
-
-@dataclass(frozen=True, slots=True)
-class HoldoutConfig:
-	cell_fraction: float
-	min_remaining: int
-	seed: int
+	holdout_fraction: float
+	holdout_min_remaining: int
+	sample_seed: int
+	holdout_seed: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,35 +66,10 @@ class TrainConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class SynthRefConfig:
-	n_items: int
-	n_persons: int
+class ReferenceConfig:
 	chains: int
 	samples: int
 	warmup: int
-
-
-@dataclass(frozen=True, slots=True)
-class SynthConfig:
-	a: tuple[float, float]
-	b: tuple[float, float]
-	omega: tuple[float, float]
-	gamma_0: tuple[float, float]
-	gamma_1: tuple[float, float]
-	seed: int
-	ref: SynthRefConfig
-
-
-@dataclass(frozen=True, slots=True)
-class DataConfig:
-	response: str
-	pool: str
-	keys: tuple[int, ...]
-	link_threshold: int
-	diagnostics: DiagnosticsConfig
-	sample: SampleConfig
-	core: CoreConfig
-	holdout: HoldoutConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,17 +80,17 @@ class Config:
 	data: DataConfig
 	model: ModelConfig
 	train: TrainConfig
-	synth: SynthConfig
+	reference: ReferenceConfig
 	raw: dict[str, Any]
 
-	@property
-	def osu_cache(self) -> Path:
-		return self.paths.artifacts / "osu"
+	def directory(self, name: str) -> Path:
+		"""One of the artifact subdirectories, created on demand."""
+		if name not in ARTIFACT_DIRS:
+			raise ValueError(f"artifact directory must be one of {ARTIFACT_DIRS}, got {name!r}")
+		path = self.paths.artifacts / name
+		path.mkdir(parents=True, exist_ok=True)
 
-	def ensure_dirs(self) -> None:
-		"""Create the artifact tree if it does not exist."""
-		for d in (self.paths.artifacts, self.osu_cache):
-			d.mkdir(parents=True, exist_ok=True)
+		return path
 
 
 def resolve_path(explicit: str | os.PathLike[str] | None = None) -> Path:
@@ -157,12 +122,9 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
 
 
 def _require(raw: dict[str, Any], section: str, key: str) -> Any:
-	node: Any = raw
-	for part in section.split("."):
-		node = node.get(part) if isinstance(node, dict) else None
-		if node is None:
-			raise ConfigError(f"missing section [{section}] in the configuration file")
-
+	node = raw.get(section)
+	if node is None:
+		raise ConfigError(f"missing section [{section}] in the configuration file")
 	if not isinstance(node, dict):
 		raise ConfigError(f"[{section}] must be a table in the configuration file")
 	if key not in node:
@@ -179,21 +141,6 @@ def _ints(value: Any, section: str, key: str) -> tuple[int, ...]:
 		return tuple(int(v) for v in value)
 	except (TypeError, ValueError):
 		raise ConfigError(f"[{section}] {key} must contain only integers") from None
-
-
-def _pair(value: Any, section: str, key: str) -> tuple[float, float]:
-	if not isinstance(value, list) or len(value) != 2:
-		raise ConfigError(f"[{section}] {key} must be a list of two numbers")
-
-	try:
-		low, high = (float(v) for v in value)
-	except (TypeError, ValueError):
-		raise ConfigError(f"[{section}] {key} must contain only numbers") from None
-
-	if low >= high:
-		raise ConfigError(f"[{section}] {key} must be increasing, got {value}")
-
-	return low, high
 
 
 def _build(path: Path, raw: dict[str, Any]) -> Config:
@@ -217,38 +164,14 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 			response=response,
 			pool=pool,
 			keys=_ints(_require(raw, "data", "keys"), "data", "keys"),
-			link_threshold=int(_require(raw, "data", "link_threshold")),
-			diagnostics=DiagnosticsConfig(
-				link_thresholds=_ints(
-					_require(raw, "data.diagnostics", "link_thresholds"),
-					"data.diagnostics",
-					"link_thresholds",
-				),
-				kcore_min_items=_ints(
-					_require(raw, "data.diagnostics", "kcore_min_items"),
-					"data.diagnostics",
-					"kcore_min_items",
-				),
-				kcore_min_users=_ints(
-					_require(raw, "data.diagnostics", "kcore_min_users"),
-					"data.diagnostics",
-					"kcore_min_users",
-				),
-			),
-			sample=SampleConfig(
-				n_items=int(_require(raw, "data.sample", "n_items")),
-				min_items_per_key=int(_require(raw, "data.sample", "min_items_per_key")),
-				seed=int(_require(raw, "data.sample", "seed")),
-			),
-			core=CoreConfig(
-				min_items=int(_require(raw, "data.core", "min_items")),
-				min_users=int(_require(raw, "data.core", "min_users")),
-			),
-			holdout=HoldoutConfig(
-				cell_fraction=float(_require(raw, "data.holdout", "cell_fraction")),
-				min_remaining=int(_require(raw, "data.holdout", "min_remaining")),
-				seed=int(_require(raw, "data.holdout", "seed")),
-			),
+			n_items=int(_require(raw, "data", "n_items")),
+			min_responses_per_item=int(_require(raw, "data", "min_responses_per_item")),
+			min_responses_per_user=int(_require(raw, "data", "min_responses_per_user")),
+			min_items_per_key=int(_require(raw, "data", "min_items_per_key")),
+			holdout_fraction=float(_require(raw, "data", "holdout_fraction")),
+			holdout_min_remaining=int(_require(raw, "data", "holdout_min_remaining")),
+			sample_seed=int(_require(raw, "data", "sample_seed")),
+			holdout_seed=int(_require(raw, "data", "holdout_seed")),
 		),
 		model=ModelConfig(
 			quadrature_nodes=int(_require(raw, "model", "quadrature_nodes")),
@@ -262,20 +185,10 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 			patience=int(_require(raw, "train", "patience")),
 			seed=int(_require(raw, "train", "seed")),
 		),
-		synth=SynthConfig(
-			a=_pair(_require(raw, "synth", "a"), "synth", "a"),
-			b=_pair(_require(raw, "synth", "b"), "synth", "b"),
-			omega=_pair(_require(raw, "synth", "omega"), "synth", "omega"),
-			gamma_0=_pair(_require(raw, "synth", "gamma_0"), "synth", "gamma_0"),
-			gamma_1=_pair(_require(raw, "synth", "gamma_1"), "synth", "gamma_1"),
-			seed=int(_require(raw, "synth", "seed")),
-			ref=SynthRefConfig(
-				n_items=int(_require(raw, "synth.ref", "n_items")),
-				n_persons=int(_require(raw, "synth.ref", "n_persons")),
-				chains=int(_require(raw, "synth.ref", "chains")),
-				samples=int(_require(raw, "synth.ref", "samples")),
-				warmup=int(_require(raw, "synth.ref", "warmup")),
-			),
+		reference=ReferenceConfig(
+			chains=int(_require(raw, "reference", "chains")),
+			samples=int(_require(raw, "reference", "samples")),
+			warmup=int(_require(raw, "reference", "warmup")),
 		),
 		raw=raw,
 	)

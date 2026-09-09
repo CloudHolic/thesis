@@ -8,7 +8,7 @@ from typing import NamedTuple
 import numpy as np
 from scipy.special import expit
 
-from thesis.model.transform import Z_DIM
+from thesis.model.likelihood import Z_DIM
 
 
 class Fixture(NamedTuple):
