@@ -10,6 +10,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
+from thesis.utils.quadrature import Quadrature, gauss_hermite
+
 from . import difficulty, likelihood, loop
 
 
@@ -22,7 +24,7 @@ class Objective(Protocol):
 	def loss(
 		self,
 		params: Any,
-		quad: likelihood.Quadrature,
+		quad: Quadrature,
 		responses: likelihood.Responses,
 		key: Array | None = None,
 		/,
@@ -79,7 +81,7 @@ def run(
 ) -> Fitted:
 	"""Fit on the training cells and report."""
 	train = np.ones(response.size, dtype=bool) if held_out is None else ~held_out
-	quad = likelihood.gauss_hermite(settings.quadrature_nodes)
+	quad = gauss_hermite(settings.quadrature_nodes)
 	training = likelihood.split_by_branch(
 		item_index[train], person_index[train], response[train], n_persons
 	)

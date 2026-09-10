@@ -1,1 +1,1 @@
-"""Comparison implementations. The paper's ZOI, and whatever else the model is judged against."""
+"""The IRT models as their papers write them."""

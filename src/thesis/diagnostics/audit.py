@@ -11,6 +11,7 @@ from scipy.stats import norm
 
 from thesis.model import likelihood
 from thesis.model.likelihood import Tau
+from thesis.utils.quadrature import Center, gauss_hermite
 
 GRID_LIMIT = 8.0
 GRID_POINTS = 4001
@@ -74,9 +75,7 @@ def estimate(tau: Tau, items: np.ndarray, ys: np.ndarray, n_nodes: int, *, adapt
 	center = (
 		None
 		if adaptive
-		else likelihood.Center(mode=jnp.zeros(1), sd=jnp.ones(1), usable=jnp.ones(1, dtype=bool))
+		else Center(mode=jnp.zeros(1), sd=jnp.ones(1), usable=jnp.ones(1, dtype=bool))
 	)
 
-	return float(
-		likelihood.log_marginal(tau, likelihood.gauss_hermite(n_nodes), split, center=center)[0]
-	)
+	return float(likelihood.log_marginal(tau, gauss_hermite(n_nodes), split, center=center)[0])

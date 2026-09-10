@@ -18,9 +18,10 @@ import numpy as np
 from thesis import config, report, runmeta
 from thesis.data import dataset
 from thesis.diagnostics import audit, recovery, synth
-from thesis.model import difficulty, likelihood, precision
+from thesis.model import difficulty, likelihood
 from thesis.model import fit as model_fit
 from thesis.model.loss import zoi_map
+from thesis.utils import precision
 
 # Response counts and node counts the audit sweeps, and the theta it draws at.
 RESPONSE_COUNTS = (1, 3, 10, 30, 100, 300, 1000)
@@ -180,10 +181,10 @@ def main() -> None:
 
 	reference_meta: dict[str, object] = {}
 	if args.reference:
-		from thesis.references import zoi
+		from thesis.references.zoi import mcmc
 
 		started = time.monotonic()
-		post = zoi.run(
+		post = mcmc.run(
 			item,
 			person,
 			fixture.response,

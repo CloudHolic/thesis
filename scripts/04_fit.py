@@ -18,7 +18,7 @@ import numpy as np
 from thesis import config, domain, report, runmeta
 from thesis.data import dataset
 from thesis.model import fit as model_fit
-from thesis.model import precision
+from thesis.utils import precision
 
 LOSSES = ("zoi_map", "zoi_elbo")
 
@@ -68,10 +68,10 @@ def main() -> None:
 	}
 
 	if args.reference:
-		from thesis.references import zoi
+		from thesis.references.zoi import mcmc
 
 		started = time.monotonic()
-		post = zoi.run(
+		post = mcmc.run(
 			data.item_index[train],
 			person[train],
 			response[train],
@@ -92,7 +92,7 @@ def main() -> None:
 			f"max r_hat {max(worst.values()):.4f}\n\n{body}"
 		)
 
-		sites = list(zoi.SITES)
+		sites = list(mcmc.SITES)
 		out = fits / f"reference_{response_name}_{pool}.npz"
 		np.savez_compressed(
 			out,

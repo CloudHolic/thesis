@@ -1,4 +1,4 @@
-"""Molenaar's ZOI Beta-IRT."""
+"""Molenaar's ZOI Beta-IRT, sampled with NUTS."""
 
 from __future__ import annotations
 
@@ -11,6 +11,9 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro.diagnostics import summary
 from numpyro.infer import MCMC, NUTS
+
+from thesis.references.interior import beta
+from thesis.references.zoi import kernel
 
 SITES: tuple[str, ...] = ("log_a", "b", "omega", "gamma_0", "gamma_1")
 
@@ -41,20 +44,22 @@ def model(
 			numpyro.sample("gamma_1", dist.TruncatedNormal(0.0, 10.0, low=gamma_0))
 		)
 
-	a_theta = jnp.exp(log_a)[item] * theta[person]
-	eta = a_theta + b[item]
-	k0 = jax.nn.sigmoid(gamma_0[item] - a_theta)
-	k1 = jax.nn.sigmoid(gamma_1[item] - a_theta)
+	a = jnp.exp(log_a)[item]
+	a_theta = a * theta[person]
+	is_interior = (y > 0.0) & (y < 1.0)
 
-	interior = (y > 0.0) & (y < 1.0)
-	half_omega = omega[item] / 2.0
-	shapes = dist.Beta(jnp.exp(eta / 2.0 + half_omega), jnp.exp(-eta / 2.0 + half_omega))
-
-	# log(k1 - k0) is left in probability space.
+	# The interior density is masked away from the atoms before it is ever formed.
+	safe = jnp.where(is_interior, y, 0.5)
+	tau = beta.BetaTau(a=a, b=b[item], omega=omega[item])
 	log_k = jnp.where(
-		interior,
-		jnp.log(k1 - k0) + shapes.log_prob(jnp.where(interior, y, 0.5)),
-		jnp.where(y == 0.0, jnp.log(k0), jnp.log1p(-k1)),
+		is_interior,
+		kernel.log_pi_b(a_theta, gamma_0[item], gamma_1[item])
+		+ beta.log_f(tau, theta[person], (jnp.log(safe), jnp.log1p(-safe))),
+		jnp.where(
+			y == 0.0,
+			kernel.log_k_zero(a_theta, gamma_0[item]),
+			kernel.log_k_one(a_theta, gamma_1[item]),
+		),
 	)
 	numpyro.factor("responses", log_k.sum())
 

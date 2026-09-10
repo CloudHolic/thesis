@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.stats import spearmanr
 
-from thesis.references.zoi import Posterior
+from thesis.references.zoi.mcmc import Posterior
 
 
 def tau_from_posterior(post: Posterior) -> np.ndarray:

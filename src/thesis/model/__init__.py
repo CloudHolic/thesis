@@ -1,1 +1,1 @@
-"""The ZOI Beta-IRT likelihood: z-to-tau transform, log-kernel, and marginalization."""
+"""How the densities in `thesis.references` are fitted: coordinates, priors, objectives, readout."""

@@ -1,4 +1,4 @@
-"""Process-wide float precision for JAX, which must be set efore any array exists."""
+"""Process-wide float precision for JAX, which must be set before any array exists."""
 
 from __future__ import annotations
 
