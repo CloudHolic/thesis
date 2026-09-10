@@ -64,3 +64,18 @@ seed = 20260906
 chains = 4
 samples = 1000
 warmup = 1000
+
+[charts]
+# The .osu mirrors, tried in order. Each entry needs a {beatmap_id} slot.
+mirrors = [
+    "https://osu.direct/api/osu/{beatmap_id}",
+    "https://catboy.best/osu/{beatmap_id}",
+]
+
+# The mirrors are run by volunteers. Say what the project is and leave a way to
+# be reached. This file is not committed, which is why the address can live here.
+user_agent = "osu-mania-thesis/1.0 (research; contact: YOU@example.com)"
+
+# Concurrent downloads and their combined rate in requests per second.
+jobs = 8
+rate = 10.0

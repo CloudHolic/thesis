@@ -1,13 +1,14 @@
-"""Diagnose the response graph, then build the pilot dataset.
+"""Diagnose the response graph, build the pilot dataset, then fetch its charts.
 
-uv run scripts/01_dataset.py                  diagnostics and build
-uv run scripts/01_dataset.py --diagnose-only  linking and k-core sweep alone
+uv run scripts/01_dataset.py                 every stage
+uv run scripts/01_dataset.py --only charts   download the .osu files alone
 """
 
 from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
 
@@ -15,7 +16,10 @@ import numpy as np
 import polars as pl
 
 from thesis import config, db, domain, runmeta
+from thesis.charts import fetch
 from thesis.data import dataset, holdout, kcore, linking, sample
+
+SCRIPT = Path(__file__).name
 
 # Grids for the finished sweeps. The thresholds they justified are in decisions.md;
 # these stay so the diagnostic artifacts can be reproduced.
@@ -23,6 +27,8 @@ LINK_THRESHOLDS = (1, 2, 5, 10, 20, 50)
 LINK_THRESHOLD = 10
 KCORE_MIN_ITEMS = (5, 10, 20, 50, 100)
 KCORE_MIN_USERS = (5, 10, 20, 50)
+
+STAGES = ("diagnose", "dataset", "charts")
 
 
 def response_shape(values: np.ndarray) -> dict[str, float]:
@@ -49,17 +55,10 @@ def spread(values: np.ndarray) -> dict[str, float]:
 	}
 
 
-def main() -> None:
-	ap = argparse.ArgumentParser(description=__doc__)
-	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
-	ap.add_argument("--pool", default=None, choices=list(domain.POOLS))
-	ap.add_argument("--diagnose-only", action="store_true", help="skip the dataset build")
-	args = ap.parse_args()
-
-	cfg = config.load(args.config)
-	pool = args.pool or cfg.data.pool
-	names = sorted(domain.VIEWS)
-
+def pull_frames(
+	cfg: config.Config, pool: str, names: Sequence[str]
+) -> tuple[dict[str, pl.DataFrame], float]:
+	"""Every response view for one pool, and how long the queries took."""
 	started = time.monotonic()
 	frames = {
 		name: db.responses(
@@ -70,13 +69,18 @@ def main() -> None:
 		)
 		for name in names
 	}
-	query_seconds = time.monotonic() - started
+	seconds = time.monotonic() - started
 	for name, frame in frames.items():
 		if frame.height == 0:
 			raise SystemExit(f"no rows for response={name} pool={pool}")
 
-	# One frame with every response variable side by side. The join is what guarantees
-	# the variables sit on the same cells; a height mismatch means they do not.
+	return frames, seconds
+
+
+def merge_frames(frames: dict[str, pl.DataFrame], names: Sequence[str]) -> pl.DataFrame:
+	"""One frame with every response variable side by side."""
+	# The join is what guarantees the variables sit on the same cells; a height mismatch
+	# means they do not.
 	merged = frames[names[0]].rename({"response": names[0]})
 	for name in names[1:]:
 		merged = merged.join(
@@ -86,8 +90,11 @@ def main() -> None:
 		if merged.height != frames[name].height:
 			raise SystemExit(f"[{names[0]}] and [{name}] do not cover the same cells")
 
-	base = frames[names[0]]
-	diagnostics = cfg.directory("diagnostics")
+	return merged
+
+
+def diagnose(cfg: config.Config, pool: str, base: pl.DataFrame, query_seconds: float) -> None:
+	"""Sweep linking and k-core over the pulled responses and write the tables as parquet."""
 	present = sorted(int(k) for k in base["keys"].unique())
 	link_table = linking.summary(base, keys=present, thresholds=LINK_THRESHOLDS)
 	link_matrix = linking.pairwise(base, keys=present, threshold=LINK_THRESHOLD)
@@ -95,7 +102,7 @@ def main() -> None:
 	sweep = kcore.sweep(base, min_items=KCORE_MIN_ITEMS, min_users=KCORE_MIN_USERS)
 
 	meta = runmeta.build(
-		script="01_dataset.py",
+		script=SCRIPT,
 		config_raw=cfg.raw,
 		extra={
 			"effective": {
@@ -114,6 +121,7 @@ def main() -> None:
 			"components": asdict(graph),
 		},
 	)
+	diagnostics = cfg.directory("diagnostics")
 	for name, frame in (
 		("linking", link_table),
 		("linking_pairwise", link_matrix),
@@ -135,9 +143,15 @@ def main() -> None:
 	)
 	print(f"pulled      {base.height:,} responses in {query_seconds:.1f}s")
 
-	if args.diagnose_only:
-		return
 
+def build_dataset(
+	cfg: config.Config,
+	pool: str,
+	names: Sequence[str],
+	merged: pl.DataFrame,
+	query_seconds: float,
+) -> None:
+	"""Filter to a k-core, draw the item sample, hold cells out, and write the dataset."""
 	core = kcore.filter_kcore(
 		merged,
 		min_item=cfg.data.min_responses_per_item,
@@ -167,8 +181,8 @@ def main() -> None:
 		),
 	)
 
-	per_item = np.bincount(data.item_index, minlength=data.n_items)
-	per_person = data.responses_per_person()
+	per_item = spread(np.bincount(data.item_index, minlength=data.n_items))
+	per_person = spread(data.responses_per_person())
 	connectivity = linking.components(drawn)
 	summary = {
 		"n_items": data.n_items,
@@ -184,16 +198,16 @@ def main() -> None:
 	runmeta.write(
 		out,
 		runmeta.build(
-			script="01_dataset.py",
+			script=SCRIPT,
 			config_raw=cfg.raw,
 			extra={
-				"effective": {"pool": pool, "responses": names},
+				"effective": {"pool": pool, "responses": list(names)},
 				"query_seconds": round(query_seconds, 1),
 				"core": {"items": int(core["item"].n_unique()), "obs": core.height},
 				"allocation": {str(k): v for k, v in allocation.items()},
 				"dataset": summary,
-				"responses_per_item": spread(per_item),
-				"responses_per_person": spread(per_person),
+				"responses_per_item": per_item,
+				"responses_per_person": per_person,
 				"response_shape": shapes,
 				"components": {
 					"n_components": connectivity.n_components,
@@ -211,11 +225,84 @@ def main() -> None:
 		f"{summary['n_obs']:,} responses, shared by {', '.join(names)}"
 	)
 	print(f"held out    {summary['held_out']:,} of {summary['held_out_requested']:,} requested")
-	print(f"per item    {spread(per_item)}")
-	print(f"per person  {spread(per_person)}")
+	print(f"per item    {per_item}")
+	print(f"per person  {per_person}")
 	for name, shape in shapes.items():
 		print(f"response {name:>5}  {shape}")
 	print(f"\nwrote {out}")
+
+
+def fetch_charts(cfg: config.Config, pool: str) -> None:
+	"""Download every chart the dataset draws on, and name the ones that never arrived."""
+	source = cfg.directory("dataset") / f"pilot_{pool}.npz"
+	data = dataset.load(source)
+	wanted = np.unique(data.beatmap_id)
+	directory = cfg.directory("charts")
+
+	started = time.monotonic()
+	result = fetch.prefetch(
+		wanted.tolist(),
+		directory=directory,
+		mirrors=fetch.Mirrors(urls=cfg.charts.mirrors, user_agent=cfg.charts.user_agent),
+		jobs=cfg.charts.jobs,
+		rate=cfg.charts.rate,
+	)
+	minutes = (time.monotonic() - started) / 60.0
+
+	runmeta.write(
+		directory / "fetch",
+		runmeta.build(
+			script=SCRIPT,
+			config_raw=cfg.raw,
+			extra={
+				"effective": {"pool": pool, "source": source.name},
+				"charts": {
+					"requested": int(wanted.size),
+					"fetched": len(result.ok),
+					"failed": len(result.failed),
+					"minutes": round(minutes, 1),
+				},
+				"failed": result.failed,
+			},
+		),
+	)
+
+	print(
+		f"\ncharts      {len(result.ok):,} of {wanted.size:,} beatmaps "
+		f"in {minutes:.1f} min, into {directory}"
+	)
+	if result.failed:
+		print(f"failed      {len(result.failed):,}")
+		for beatmap_id, reason in sorted(result.failed.items()):
+			print(f"  {beatmap_id}: {reason}")
+
+
+def parse_args() -> argparse.Namespace:
+	ap = argparse.ArgumentParser(description=__doc__)
+	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
+	ap.add_argument("--pool", default=None, choices=list(domain.POOLS))
+	ap.add_argument("--only", default=None, choices=STAGES, help="run one stage")
+
+	return ap.parse_args()
+
+
+def main() -> None:
+	args = parse_args()
+	cfg = config.load(args.config)
+	pool = args.pool or cfg.data.pool
+	names = sorted(domain.VIEWS)
+	stages = STAGES if args.only is None else (args.only,)
+
+	if "diagnose" in stages or "dataset" in stages:
+		frames, query_seconds = pull_frames(cfg, pool, names)
+		merged = merge_frames(frames, names)
+		if "diagnose" in stages:
+			diagnose(cfg, pool, frames[names[0]], query_seconds)
+		if "dataset" in stages:
+			build_dataset(cfg, pool, names, merged, query_seconds)
+
+	if "charts" in stages:
+		fetch_charts(cfg, pool)
 
 
 if __name__ == "__main__":

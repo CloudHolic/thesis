@@ -1,44 +1,48 @@
 """Fit the item parameters on real responses, ours or the paper's.
 
-uv run scripts/04_fit.py --loss zoi_map
+uv run scripts/04_fit.py --loss map
 uv run scripts/04_fit.py --reference
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 import jax
 import numpy as np
 
-from thesis import config, domain, report, runmeta
+from thesis import artifact, config, domain, report
 from thesis.data import dataset
 from thesis.model import fit as model_fit
+from thesis.model.family.protocol import Family
 from thesis.model.family.registry import FAMILIES
+from thesis.model.loss.registry import LOSSES
 from thesis.utils import precision
 
+SCRIPT = Path(__file__).name
 FAMILY_NAMES = tuple(sorted(FAMILIES))
-LOSSES = ("map", "elbo")
+LOSS_NAMES = tuple(sorted(LOSSES))
 
 
-def main() -> None:
-	ap = argparse.ArgumentParser(description=__doc__)
-	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
-	ap.add_argument("--response", default=None, choices=sorted(domain.VIEWS))
-	ap.add_argument("--pool", default=None, choices=list(domain.POOLS))
-	ap.add_argument("--family", default="zoi_beta", choices=FAMILY_NAMES)
-	ap.add_argument("--loss", default="map", choices=LOSSES)
-	ap.add_argument("--reference", action="store_true", help="fit the paper's model instead")
-	args = ap.parse_args()
+@dataclass(frozen=True, slots=True)
+class Inputs:
+	"""One dataset, resolved to the response variable and pool this run asked for."""
 
-	cfg = config.load(args.config)
-	precision.enable(cfg.model.precision)
-	family = FAMILIES[args.family]
+	data: dataset.Dataset
+	response: np.ndarray
+	person: np.ndarray
+	train: np.ndarray
+	response_name: str
+	pool: str
+	source: Path
 
+
+def load_inputs(cfg: config.Config, args: argparse.Namespace) -> Inputs:
+	"""Read the pilot dataset and pick out the response this run fits."""
 	response_name = args.response or cfg.data.response
 	pool = args.pool or cfg.data.pool
 	source = cfg.directory("dataset") / f"pilot_{pool}.npz"
@@ -46,25 +50,39 @@ def main() -> None:
 	if response_name not in data.responses:
 		raise SystemExit(f"{source.name} has no response {response_name!r}")
 
-	response = data.responses[response_name]
-	person = data.person_index()
-	train = ~data.held_out
-	latent = family.Z_DIM * data.n_items
-	print(
-		f"data      {data.n_items:,} items, {data.n_persons:,} persons, {data.n_obs:,} "
-		f"responses, {int(data.held_out.sum()):,} held out, {latent:,} latent"
+	return Inputs(
+		data=data,
+		response=data.responses[response_name],
+		person=data.person_index(),
+		train=~data.held_out,
+		response_name=response_name,
+		pool=pool,
+		source=source,
 	)
 
-	fits = cfg.directory("fits")
-	environment = {
+
+def latent_parameters(family: Family, data: dataset.Dataset) -> int:
+	"""The item coordinates the run carries."""
+	return family.Z_DIM * data.n_items
+
+
+def environment(cfg: config.Config, args: argparse.Namespace, inputs: Inputs) -> dict[str, Any]:
+	"""What the provenance record says about where this run happened."""
+	return {
 		"family": args.family,
-		"response": response_name,
-		"pool": pool,
+		"response": inputs.response_name,
+		"pool": inputs.pool,
 		"precision": cfg.model.precision,
 		"devices": [str(d) for d in jax.devices()],
-		"source": source.name,
+		"source": inputs.source.name,
 	}
-	sizes = {
+
+
+def sizes(inputs: Inputs, latent: int) -> dict[str, int]:
+	"""What the provenance record says about the data this run saw."""
+	data = inputs.data
+
+	return {
 		"n_items": data.n_items,
 		"n_persons": data.n_persons,
 		"n_obs": data.n_obs,
@@ -72,88 +90,103 @@ def main() -> None:
 		"latent_parameters": latent,
 	}
 
-	if args.reference:
-		from thesis.references.zoi import mcmc
 
-		started = time.monotonic()
-		post = mcmc.run(
-			data.item_index[train],
-			person[train],
-			response[train],
-			data.n_items,
-			data.n_persons,
-			seed=cfg.train.seed,
-			chains=cfg.reference.chains,
-			samples=cfg.reference.samples,
-			warmup=cfg.reference.warmup,
-		)
-		minutes = (time.monotonic() - started) / 60.0
-		worst = {site: float(np.nanmax(v)) for site, v in post.r_hat.items()}
-		body = report.table(
-			["site", "max r_hat"], [[f"`{s}`", f"{v:.4f}"] for s, v in worst.items()]
-		)
-		print(
-			f"nuts      {minutes:.1f} min, divergences {post.divergences:,}, "
-			f"max r_hat {max(worst.values()):.4f}\n\n{body}"
-		)
+def settings(cfg: config.Config) -> model_fit.Settings:
+	"""Everything the optimizer loop reads out of the configuration file."""
+	return model_fit.Settings(
+		quadrature_nodes=cfg.model.quadrature_nodes,
+		optimizer=cfg.train.optimizer,
+		learning_rate=cfg.train.learning_rate,
+		steps=cfg.train.steps,
+		tolerance=cfg.train.tolerance,
+		patience=cfg.train.patience,
+		seed=cfg.train.seed,
+	)
 
-		sites = list(family.SITES)
-		out = fits / f"reference_{args.family}_{response_name}_{pool}.npz"
-		np.savez_compressed(
-			out,
-			sites=np.array(sites),
-			mean=np.stack([post.mean[s] for s in sites]),
-			median=np.stack([post.median[s] for s in sites]),
-			lower=np.stack([post.lower[s] for s in sites]),
-			upper=np.stack([post.upper[s] for s in sites]),
-			r_hat=np.stack([post.r_hat[s] for s in sites]),
-		)
-		out.with_suffix(".md").write_text(
-			f"# Reference NUTS on `{response_name}`\n\n{sizes['n_items']:,} items, "
-			f"{sizes['n_persons']:,} persons, {latent:,} latent parameters. "
-			f"{minutes:.1f} minutes, {post.divergences:,} divergences.\n\n{body}\n",
-			encoding="utf-8",
-		)
-		runmeta.write(
-			out,
-			runmeta.build(
-				script="04_fit.py",
-				config_raw=cfg.raw,
-				extra={
-					"effective": {**environment, "inference": "reference"},
-					"dataset": sizes,
-					"nuts": {
-						"minutes": round(minutes, 1),
-						"divergences": post.divergences,
-						"max_r_hat": max(worst.values()),
-						"r_hat_by_site": worst,
-					},
-				},
+
+def run_reference(
+	cfg: config.Config, args: argparse.Namespace, family: Family, inputs: Inputs
+) -> None:
+	"""The paper's own model."""
+	# Importing numpyro is expensive, and a run without --reference never needs it.
+	from thesis.references.zoi import mcmc
+
+	data = inputs.data
+	train = inputs.train
+
+	started = time.monotonic()
+	post = mcmc.run(
+		data.item_index[train],
+		inputs.person[train],
+		inputs.response[train],
+		data.n_items,
+		data.n_persons,
+		seed=cfg.train.seed,
+		chains=cfg.reference.chains,
+		samples=cfg.reference.samples,
+		warmup=cfg.reference.warmup,
+	)
+	minutes = (time.monotonic() - started) / 60.0
+
+	worst = {site: float(np.nanmax(v)) for site, v in post.r_hat.items()}
+	body = report.table(["site", "max r_hat"], [[f"`{s}`", f"{v:.4f}"] for s, v in worst.items()])
+	print(
+		f"nuts      {minutes:.1f} min, divergences {post.divergences:,}, "
+		f"max r_hat {max(worst.values()):.4f}\n\n{body}"
+	)
+
+	sites = list(family.SITES)
+	latent = latent_parameters(family, data)
+	stem = f"reference_{args.family}_{inputs.response_name}_{inputs.pool}"
+	out = cfg.directory("fits") / f"{stem}.npz"
+	artifact.write(
+		out,
+		artifact.Artifact(
+			arrays={
+				"sites": np.array(sites),
+				"mean": np.stack([post.mean[s] for s in sites]),
+				"median": np.stack([post.median[s] for s in sites]),
+				"lower": np.stack([post.lower[s] for s in sites]),
+				"upper": np.stack([post.upper[s] for s in sites]),
+				"r_hat": np.stack([post.r_hat[s] for s in sites]),
+			},
+			title=f"Reference NUTS on `{inputs.response_name}`",
+			preamble=(
+				f"{data.n_items:,} items, {data.n_persons:,} persons, "
+				f"{latent:,} latent parameters. "
+				f"{minutes:.1f} minutes, {post.divergences:,} divergences."
 			),
-		)
-		print(f"\nwrote {out}")
-		return
+			body=body,
+			extra={
+				"effective": {**environment(cfg, args, inputs), "inference": "reference"},
+				"dataset": sizes(inputs, latent),
+				"nuts": {
+					"minutes": round(minutes, 1),
+					"divergences": post.divergences,
+					"max_r_hat": max(worst.values()),
+					"r_hat_by_site": worst,
+				},
+			},
+		),
+		script=SCRIPT,
+		config_raw=cfg.raw,
+	)
+	print(f"\nwrote {out}")
 
-	module = importlib.import_module(f"thesis.model.loss.{args.loss}")
-	objective = cast(model_fit.Objective, module.build(family))
+
+def run_fit(cfg: config.Config, args: argparse.Namespace, family: Family, inputs: Inputs) -> None:
+	"""Our own inference."""
+	data = inputs.data
 	result = model_fit.run(
-		objective,
+		LOSSES[args.loss](family),
 		family=family,
 		item_index=data.item_index,
-		person_index=person,
-		response=response,
+		person_index=inputs.person,
+		response=inputs.response,
 		n_items=data.n_items,
 		n_persons=data.n_persons,
 		held_out=data.held_out,
-		settings=model_fit.Settings(
-			quadrature_nodes=cfg.model.quadrature_nodes,
-			optimizer=cfg.train.optimizer,
-			learning_rate=cfg.train.learning_rate,
-			steps=cfg.train.steps,
-			tolerance=cfg.train.tolerance,
-			patience=cfg.train.patience,
-			seed=cfg.train.seed,
-		),
+		settings=settings(cfg),
 	)
 
 	usable = int(result.theta_usable.sum())
@@ -171,35 +204,34 @@ def main() -> None:
 
 	flag_names = sorted(result.extrapolated)
 	reported_names = sorted(result.reported)
-	out = fits / f"{args.family}_{args.loss}_{response_name}_{pool}.npz"
-	np.savez_compressed(
+	latent = latent_parameters(family, data)
+	stem = f"{args.family}_{args.loss}_{inputs.response_name}_{inputs.pool}"
+	out = cfg.directory("fits") / f"{stem}.npz"
+	artifact.write(
 		out,
-		reported_names=np.array(reported_names),
-		reported=np.stack([result.reported[name] for name in reported_names]),
-		losses=result.losses,
-		seconds=result.seconds,
-		theta_mode=result.theta_mode,
-		theta_usable=result.theta_usable,
-		item_theta_low=result.item_theta_low,
-		item_theta_high=result.item_theta_high,
-		flag_names=np.array(flag_names),
-		extrapolated=np.stack([result.extrapolated[name] for name in flag_names]),
-	)
-	out.with_suffix(".md").write_text(
-		f"# `{args.loss}` on `{response_name}`\n\n{sizes['n_items']:,} items, "
-		f"{sizes['n_persons']:,} persons, {int(train.sum()):,} training cells. "
-		f"Held-out log-likelihood {result.held_out_log_likelihood:.4f} per cell.\n\n"
-		f"{body}\n\n{flags}\n",
-		encoding="utf-8",
-	)
-	runmeta.write(
-		out,
-		runmeta.build(
-			script="04_fit.py",
-			config_raw=cfg.raw,
+		artifact.Artifact(
+			arrays={
+				"reported_names": np.array(reported_names),
+				"reported": np.stack([result.reported[name] for name in reported_names]),
+				"losses": result.losses,
+				"seconds": result.seconds,
+				"theta_mode": result.theta_mode,
+				"theta_usable": result.theta_usable,
+				"item_theta_low": result.item_theta_low,
+				"item_theta_high": result.item_theta_high,
+				"flag_names": np.array(flag_names),
+				"extrapolated": np.stack([result.extrapolated[name] for name in flag_names]),
+			},
+			title=f"`{args.loss}` on `{inputs.response_name}`",
+			preamble=(
+				f"{data.n_items:,} items, {data.n_persons:,} persons, "
+				f"{int(inputs.train.sum()):,} training cells. "
+				f"Held-out log-likelihood {result.held_out_log_likelihood:.4f} per cell."
+			),
+			body=f"{body}\n\n{flags}",
 			extra={
-				"effective": {**environment, "inference": args.loss},
-				"dataset": sizes,
+				"effective": {**environment(cfg, args, inputs), "inference": args.loss},
+				"dataset": sizes(inputs, latent),
 				"fit": {
 					"steps": result.steps,
 					"converged": result.converged,
@@ -212,8 +244,42 @@ def main() -> None:
 				"extrapolated": shares,
 			},
 		),
+		script=SCRIPT,
+		config_raw=cfg.raw,
 	)
 	print(f"\nwrote {out}")
+
+
+def parse_args() -> argparse.Namespace:
+	ap = argparse.ArgumentParser(description=__doc__)
+	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
+	ap.add_argument("--response", default=None, choices=sorted(domain.VIEWS))
+	ap.add_argument("--pool", default=None, choices=list(domain.POOLS))
+	ap.add_argument("--family", default="zoi_beta", choices=FAMILY_NAMES)
+	ap.add_argument("--loss", default="map", choices=LOSS_NAMES)
+	ap.add_argument("--reference", action="store_true", help="fit the paper's model instead")
+
+	return ap.parse_args()
+
+
+def main() -> None:
+	args = parse_args()
+	cfg = config.load(args.config)
+	precision.enable(cfg.model.precision)
+
+	family = FAMILIES[args.family]
+	inputs = load_inputs(cfg, args)
+	data = inputs.data
+	print(
+		f"data      {data.n_items:,} items, {data.n_persons:,} persons, {data.n_obs:,} "
+		f"responses, {int(data.held_out.sum()):,} held out, "
+		f"{latent_parameters(family, data):,} latent"
+	)
+
+	if args.reference:
+		run_reference(cfg, args, family, inputs)
+	else:
+		run_fit(cfg, args, family, inputs)
 
 
 if __name__ == "__main__":

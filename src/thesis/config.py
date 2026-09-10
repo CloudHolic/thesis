@@ -73,6 +73,14 @@ class ReferenceConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ChartsConfig:
+	mirrors: tuple[str, ...]
+	user_agent: str
+	jobs: int
+	rate: float
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
 	path: Path
 	db: DbConfig
@@ -81,6 +89,7 @@ class Config:
 	model: ModelConfig
 	train: TrainConfig
 	reference: ReferenceConfig
+	charts: ChartsConfig
 	raw: dict[str, Any]
 
 	def directory(self, name: str) -> Path:
@@ -143,6 +152,13 @@ def _ints(value: Any, section: str, key: str) -> tuple[int, ...]:
 		raise ConfigError(f"[{section}] {key} must contain only integers") from None
 
 
+def _strings(value: Any, section: str, key: str) -> tuple[str, ...]:
+	if not isinstance(value, list) or not value:
+		raise ConfigError(f"[{section}] {key} must be a non-empty list of strings")
+
+	return tuple(str(v) for v in value)
+
+
 def _build(path: Path, raw: dict[str, Any]) -> Config:
 	response = _require(raw, "data", "response")
 	if response not in domain.VIEWS:
@@ -155,6 +171,11 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 	artifacts = Path(str(_require(raw, "paths", "artifacts")))
 	if not artifacts.is_absolute():
 		artifacts = REPO_ROOT / artifacts
+
+	mirrors = _strings(_require(raw, "charts", "mirrors"), "charts", "mirrors")
+	for url in mirrors:
+		if "{beatmap_id}" not in url:
+			raise ConfigError(f"[charts] mirrors entries need a {{beatmap_id}} slot: {url!r}")
 
 	return Config(
 		path=path,
@@ -189,6 +210,12 @@ def _build(path: Path, raw: dict[str, Any]) -> Config:
 			chains=int(_require(raw, "reference", "chains")),
 			samples=int(_require(raw, "reference", "samples")),
 			warmup=int(_require(raw, "reference", "warmup")),
+		),
+		charts=ChartsConfig(
+			mirrors=mirrors,
+			user_agent=str(_require(raw, "charts", "user_agent")),
+			jobs=int(_require(raw, "charts", "jobs")),
+			rate=float(_require(raw, "charts", "rate")),
 		),
 		raw=raw,
 	)
