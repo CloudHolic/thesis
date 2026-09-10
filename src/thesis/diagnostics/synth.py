@@ -8,7 +8,8 @@ import numpy as np
 from scipy.special import expit
 
 from thesis.data import Dataset
-from thesis.model.likelihood import Z_DIM
+
+Z_DIM = 5
 
 
 class Fixture(NamedTuple):

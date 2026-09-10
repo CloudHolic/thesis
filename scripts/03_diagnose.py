@@ -18,8 +18,9 @@ import numpy as np
 from thesis import config, report, runmeta
 from thesis.data import dataset
 from thesis.diagnostics import audit, recovery, synth
-from thesis.model import difficulty, likelihood
+from thesis.model import difficulty
 from thesis.model import fit as model_fit
+from thesis.model.family.registry import FAMILIES
 from thesis.model.loss import zoi_map
 from thesis.utils import precision
 
@@ -51,6 +52,7 @@ def main() -> None:
 	cfg = config.load(args.config)
 	# Before any array exists, and therefore before anything else is touched.
 	precision.enable(cfg.model.precision)
+	family = FAMILIES["zoi_beta"]
 
 	out_dir = cfg.directory("diagnostics")
 	environment = {
@@ -62,7 +64,7 @@ def main() -> None:
 	if "quadrature" in stages:
 		rng = np.random.default_rng(SYNTH_SEED)
 		z = synth.draw_z(rng, REF_ITEMS, TAU_RANGES)
-		tau = likelihood.to_tau(jnp.asarray(z))
+		tau = family.to_tau(jnp.asarray(z))
 
 		modes = np.empty(len(RESPONSE_COUNTS))
 		sds = np.empty(len(RESPONSE_COUNTS))
@@ -74,13 +76,13 @@ def main() -> None:
 			ys = synth.draw_responses(
 				rng, z, np.array([THETA_TRUE]), items, np.zeros(n_resp, dtype=int)
 			)
-			truth, modes[row], sds[row] = audit.exact(tau, items, ys)
+			truth, modes[row], sds[row] = audit.exact(family, tau, items, ys)
 			for col, nodes in enumerate(NODE_COUNTS):
 				standard[row, col] = abs(
-					audit.estimate(tau, items, ys, nodes, adaptive=False) - truth
+					audit.estimate(family, tau, items, ys, nodes, adaptive=False) - truth
 				)
 				adaptive[row, col] = abs(
-					audit.estimate(tau, items, ys, nodes, adaptive=True) - truth
+					audit.estimate(family, tau, items, ys, nodes, adaptive=True) - truth
 				)
 
 		header = (
@@ -153,6 +155,7 @@ def main() -> None:
 
 	fit = model_fit.run(
 		zoi_map,
+		family=family,
 		item_index=item,
 		person_index=person,
 		response=fixture.response,
@@ -175,7 +178,7 @@ def main() -> None:
 		f"adaptive centres {usable:,}/{n_persons:,}"
 	)
 
-	truth = difficulty.quantities(difficulty.tau_from_z(fixture.z))
+	truth = difficulty.quantities(family, family.to_tau(jnp.asarray(fixture.z)))
 	tables = {"ours_vs_truth": recovery.compare(truth, fit.quantities)}
 	blocks = [report.comparison(tables["ours_vs_truth"], "ours vs truth")]
 
@@ -195,7 +198,7 @@ def main() -> None:
 			samples=cfg.reference.samples,
 			warmup=cfg.reference.warmup,
 		)
-		theirs = difficulty.quantities(recovery.tau_from_posterior(post))
+		theirs = difficulty.quantities(family, family.tau_from_sites(post.mean))
 		tables["reference_vs_truth"] = recovery.compare(truth, theirs)
 		tables["ours_vs_reference"] = recovery.compare(theirs, fit.quantities)
 		blocks += [

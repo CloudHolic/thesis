@@ -9,16 +9,18 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from thesis.model import encoder, likelihood
+from thesis.model import likelihood
+from thesis.model.family.registry import FAMILIES
+from thesis.utils.quadrature import Quadrature
 
-PRIOR_SCALE = 10.0
+_FAMILY = FAMILIES["zoi_beta"]
 
 INITIAL_LOG_SD = -2.0
 
 INTERVAL_DRAWS = 512
 INTERVAL_PROBS = (5.0, 95.0)
 
-_ROWS, _COLS = np.tril_indices(likelihood.Z_DIM)
+_ROWS, _COLS = np.tril_indices(_FAMILY.Z_DIM)
 _DIAG = np.flatnonzero(_ROWS == _COLS)
 _N_TRIL = _ROWS.size
 
@@ -39,19 +41,19 @@ def _matrix(cholesky: Array) -> Array:
 	"""(n_items, Z_DIM, Z_DIM) lower triangular with a positive diagonal."""
 	n_items = cholesky.shape[0]
 	return (
-		jnp.zeros((n_items, likelihood.Z_DIM, likelihood.Z_DIM))
+		jnp.zeros((n_items, _FAMILY.Z_DIM, _FAMILY.Z_DIM))
 		.at[:, _ROWS, _COLS]
 		.set(_positive(cholesky))
 	)
 
 
 def init(response: np.ndarray, n_items: int) -> Variational:
-	"""Same starting mean as the point estimate."""
+	"""The same starting mean as the point estimate."""
 	cholesky = np.zeros((n_items, _N_TRIL))
 	cholesky[:, _DIAG] = INITIAL_LOG_SD
 
 	return Variational(
-		mu=jnp.asarray(encoder.initial_z(response, n_items)), cholesky=jnp.asarray(cholesky)
+		mu=jnp.asarray(_FAMILY.initial_z(response, n_items)), cholesky=jnp.asarray(cholesky)
 	)
 
 
@@ -68,17 +70,17 @@ def kl(params: Variational) -> Array:
 	quadratic = jnp.sum(jnp.square(params.mu), axis=1)
 	log_det = 2.0 * jnp.sum(params.cholesky[:, _DIAG], axis=1)
 
+	scale = _FAMILY.prior_scale
+	z_dim = _FAMILY.Z_DIM
+
 	return 0.5 * jnp.sum(
-		(frobenius + quadratic) / PRIOR_SCALE**2
-		- likelihood.Z_DIM
-		+ 2.0 * likelihood.Z_DIM * jnp.log(PRIOR_SCALE)
-		- log_det
+		(frobenius + quadratic) / scale**2 - z_dim + 2.0 * z_dim * jnp.log(scale) - log_det
 	)
 
 
 def loss(
 	params: Variational,
-	quad: likelihood.Quadrature,
+	quad: Quadrature,
 	responses: likelihood.Responses,
 	key: Array | None = None,
 ) -> Array:
@@ -86,8 +88,9 @@ def loss(
 	if key is None:
 		raise ValueError("zoi_elbo is stochastic and needs a key")
 
-	tau = likelihood.to_tau(sample(params, key))
-	return -likelihood.log_marginal(tau, quad, responses).sum() + kl(params)
+	tau = _FAMILY.to_tau(sample(params, key))
+
+	return -likelihood.log_marginal(_FAMILY, tau, quad, responses).sum() + kl(params)
 
 
 def summary(params: Variational, key: Array | None = None) -> dict[str, np.ndarray]:
@@ -96,7 +99,7 @@ def summary(params: Variational, key: Array | None = None) -> dict[str, np.ndarr
 		raise ValueError("zoi_elbo is stochastic and needs a key")
 
 	draws = jax.vmap(lambda k: sample(params, k))(jax.random.split(key, INTERVAL_DRAWS))
-	tau = jnp.stack(likelihood.to_tau(draws), axis=-1)
+	tau = jnp.stack(jax.tree.leaves(_FAMILY.to_tau(draws)), axis=-1)
 	lower, upper = np.percentile(np.asarray(tau), INTERVAL_PROBS, axis=0)
 
 	return {

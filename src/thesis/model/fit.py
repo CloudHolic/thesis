@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
+from thesis.model.family.protocol import Family
 from thesis.utils.quadrature import Quadrature, gauss_hermite
 
 from . import difficulty, likelihood, loop
@@ -71,6 +72,7 @@ class Fitted:
 def run(
 	objective: Objective,
 	*,
+	family: Family,
 	item_index: np.ndarray,
 	person_index: np.ndarray,
 	response: np.ndarray,
@@ -83,7 +85,7 @@ def run(
 	train = np.ones(response.size, dtype=bool) if held_out is None else ~held_out
 	quad = gauss_hermite(settings.quadrature_nodes)
 	training = likelihood.split_by_branch(
-		item_index[train], person_index[train], response[train], n_persons
+		family, item_index[train], person_index[train], response[train], n_persons
 	)
 
 	def loss_fn(params: Any, key: Array) -> Array:
@@ -100,21 +102,23 @@ def run(
 	)
 
 	reported = objective.summary(fit.params, jax.random.key(settings.seed + 1))
-	tau = likelihood.to_tau(jnp.asarray(reported["z"]))
-	center = likelihood.find_center(tau, training)
+	tau = family.to_tau(jnp.asarray(reported["z"]))
+	center = likelihood.find_center(family, tau, training)
 	theta = np.asarray(center.mode)
 
 	held_ll = float("nan")
 	if held_out is not None and held_out.any():
 		# The conditional of the held-out cells given the training ones, each integral
 		# centred on its own posterior.
-		everything = likelihood.split_by_branch(item_index, person_index, response, n_persons)
+		everything = likelihood.split_by_branch(
+			family, item_index, person_index, response, n_persons
+		)
 		held_ll = float(
-			likelihood.log_marginal(tau, quad, everything).sum()
-			- likelihood.log_marginal(tau, quad, training).sum()
+			likelihood.log_marginal(family, tau, quad, everything).sum()
+			- likelihood.log_marginal(family, tau, quad, training).sum()
 		) / int(held_out.sum())
 
-	quantities = difficulty.quantities(difficulty.tau_from_z(reported["z"]))
+	quantities = difficulty.quantities(family, tau)
 	low, high = difficulty.responder_range(item_index[train], person_index[train], theta, n_items)
 
 	return Fitted(
