@@ -18,9 +18,11 @@ import numpy as np
 from thesis import config, domain, report, runmeta
 from thesis.data import dataset
 from thesis.model import fit as model_fit
+from thesis.model.family.registry import FAMILIES
 from thesis.utils import precision
 
-LOSSES = ("zoi_map", "zoi_elbo")
+FAMILY_NAMES = tuple(sorted(FAMILIES))
+LOSSES = ("map", "elbo")
 
 
 def main() -> None:
@@ -28,12 +30,14 @@ def main() -> None:
 	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
 	ap.add_argument("--response", default=None, choices=sorted(domain.VIEWS))
 	ap.add_argument("--pool", default=None, choices=list(domain.POOLS))
-	ap.add_argument("--loss", default="zoi_map", choices=LOSSES)
+	ap.add_argument("--family", default="zoi_beta", choices=FAMILY_NAMES)
+	ap.add_argument("--loss", default="map", choices=LOSSES)
 	ap.add_argument("--reference", action="store_true", help="fit the paper's model instead")
 	args = ap.parse_args()
 
 	cfg = config.load(args.config)
 	precision.enable(cfg.model.precision)
+	family = FAMILIES[args.family]
 
 	response_name = args.response or cfg.data.response
 	pool = args.pool or cfg.data.pool
@@ -45,7 +49,7 @@ def main() -> None:
 	response = data.responses[response_name]
 	person = data.person_index()
 	train = ~data.held_out
-	latent = data.n_persons + 5 * data.n_items
+	latent = family.Z_DIM * data.n_items
 	print(
 		f"data      {data.n_items:,} items, {data.n_persons:,} persons, {data.n_obs:,} "
 		f"responses, {int(data.held_out.sum()):,} held out, {latent:,} latent"
@@ -53,6 +57,7 @@ def main() -> None:
 
 	fits = cfg.directory("fits")
 	environment = {
+		"family": args.family,
 		"response": response_name,
 		"pool": pool,
 		"precision": cfg.model.precision,
@@ -92,8 +97,8 @@ def main() -> None:
 			f"max r_hat {max(worst.values()):.4f}\n\n{body}"
 		)
 
-		sites = list(mcmc.SITES)
-		out = fits / f"reference_{response_name}_{pool}.npz"
+		sites = list(family.SITES)
+		out = fits / f"reference_{args.family}_{response_name}_{pool}.npz"
 		np.savez_compressed(
 			out,
 			sites=np.array(sites),
@@ -129,13 +134,11 @@ def main() -> None:
 		print(f"\nwrote {out}")
 		return
 
-	# A module cannot be checked against a Protocol, so the contract is asserted here
-	# and enforced by the loss modules all exposing init, loss and summary.
-	objective = cast(
-		model_fit.Objective, cast(object, importlib.import_module(f"thesis.model.loss.{args.loss}"))
-	)
+	module = importlib.import_module(f"thesis.model.loss.{args.loss}")
+	objective = cast(model_fit.Objective, module.build(family))
 	result = model_fit.run(
 		objective,
+		family=family,
 		item_index=data.item_index,
 		person_index=person,
 		response=response,
@@ -168,7 +171,7 @@ def main() -> None:
 
 	flag_names = sorted(result.extrapolated)
 	reported_names = sorted(result.reported)
-	out = fits / f"{args.loss}_{response_name}_{pool}.npz"
+	out = fits / f"{args.family}_{args.loss}_{response_name}_{pool}.npz"
 	np.savez_compressed(
 		out,
 		reported_names=np.array(reported_names),

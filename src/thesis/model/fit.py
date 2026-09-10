@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -16,22 +17,13 @@ from thesis.utils.quadrature import Quadrature, gauss_hermite
 from . import difficulty, likelihood, loop
 
 
-class Objective(Protocol):
-	"""What a loss module provides."""
+@dataclass(frozen=True, slots=True)
+class Objective:
+	"""What a loss module's `build` produces: everything the loop needs from a loss."""
 
-	# Positional-only: what a loss module calls its own parameters is its business.
-	def init(self, response: np.ndarray, n_items: int, /) -> Any: ...
-
-	def loss(
-		self,
-		params: Any,
-		quad: Quadrature,
-		responses: likelihood.Responses,
-		key: Array | None = None,
-		/,
-	) -> Array: ...
-
-	def summary(self, params: Any, key: Array | None = None, /) -> dict[str, np.ndarray]: ...
+	init: Callable[[np.ndarray, int], Any]
+	loss: Callable[[Any, Quadrature, likelihood.Responses, Array | None], Array]
+	summary: Callable[[Any, Array | None], dict[str, np.ndarray]]
 
 
 @dataclass(frozen=True, slots=True)

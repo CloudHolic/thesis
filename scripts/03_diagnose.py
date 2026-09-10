@@ -17,11 +17,12 @@ import numpy as np
 
 from thesis import config, report, runmeta
 from thesis.data import dataset
-from thesis.diagnostics import audit, recovery, synth
+from thesis.diagnostics import audit, cells, compare
+from thesis.diagnostics.generate.registry import GENERATORS
 from thesis.model import difficulty
 from thesis.model import fit as model_fit
 from thesis.model.family.registry import FAMILIES
-from thesis.model.loss import zoi_map
+from thesis.model.loss import map as map_loss
 from thesis.utils import precision
 
 # Response counts and node counts the audit sweeps, and the theta it draws at.
@@ -29,14 +30,10 @@ RESPONSE_COUNTS = (1, 3, 10, 30, 100, 300, 1000)
 NODE_COUNTS = (11, 21, 31, 41)
 THETA_TRUE = 0.8
 
-# True item parameters for the synthetic fixture, uniform in tau. Moment-matched to the
-# observed acc marginal: E[y] = sigmoid(b), phi = 2 exp(omega/2) cosh(eta/2),
-# P(y=1) = 1 - sigmoid(gamma_1). gamma_0 sits where the data cannot speak.
-TAU_RANGES = np.array([[0.5, 2.5], [1.5, 5.0], [0.5, 3.5], [-7.0, -5.0], [2.5, 4.5]])
-SYNTH_SEED = 20260907
 REF_ITEMS = 12
 REF_PERSONS = 200
 
+FAMILY_NAMES = tuple(sorted(FAMILIES))
 STAGES = ("quadrature", "recovery")
 FIXTURES = ("ref", "pilot")
 
@@ -46,24 +43,28 @@ def main() -> None:
 	ap.add_argument("--config", type=Path, default=None, help="path to config.toml")
 	ap.add_argument("--only", default=None, choices=STAGES, help="run one stage")
 	ap.add_argument("--fixture", default="ref", choices=FIXTURES, help="recovery scale")
+	ap.add_argument("--family", default="zoi_beta", choices=FAMILY_NAMES)
 	ap.add_argument("--reference", action="store_true", help="also fit the paper's model")
 	args = ap.parse_args()
 
 	cfg = config.load(args.config)
 	# Before any array exists, and therefore before anything else is touched.
 	precision.enable(cfg.model.precision)
-	family = FAMILIES["zoi_beta"]
+
+	family = FAMILIES[args.family]
+	generator = GENERATORS[args.family]
 
 	out_dir = cfg.directory("diagnostics")
 	environment = {
+		"family": args.family,
 		"precision": cfg.model.precision,
 		"devices": [str(d) for d in jax.devices()],
 	}
 	stages = STAGES if args.only is None else (args.only,)
 
 	if "quadrature" in stages:
-		rng = np.random.default_rng(SYNTH_SEED)
-		z = synth.draw_z(rng, REF_ITEMS, TAU_RANGES)
+		rng = np.random.default_rng(generator.SEED)
+		z = generator.draw_z(rng, REF_ITEMS, generator.TAU_RANGES)
 		tau = family.to_tau(jnp.asarray(z))
 
 		modes = np.empty(len(RESPONSE_COUNTS))
@@ -73,7 +74,7 @@ def main() -> None:
 
 		for row, n_resp in enumerate(RESPONSE_COUNTS):
 			items = rng.integers(0, REF_ITEMS, size=n_resp)
-			ys = synth.draw_responses(
+			ys = generator.draw_responses(
 				rng, z, np.array([THETA_TRUE]), items, np.zeros(n_resp, dtype=int)
 			)
 			truth, modes[row], sds[row] = audit.exact(family, tau, items, ys)
@@ -102,7 +103,7 @@ def main() -> None:
 		body = "\n".join(table)
 		print(body)
 
-		out = out_dir / "quadrature_audit.npz"
+		out = out_dir / f"quadrature_audit_{args.family}.npz"
 		np.savez_compressed(
 			out,
 			response_counts=np.array(RESPONSE_COUNTS),
@@ -137,14 +138,16 @@ def main() -> None:
 
 	if args.fixture == "ref":
 		n_items, n_persons = REF_ITEMS, REF_PERSONS
-		item, person = synth.full_cross(n_items, n_persons)
+		item, person = cells.full_cross(n_items, n_persons)
 	else:
 		source = cfg.directory("dataset") / f"pilot_{cfg.data.pool}.npz"
 		data = dataset.load(source)
 		n_items, n_persons = data.n_items, data.n_persons
-		item, person = synth.training_cells(data)
+		item, person = cells.training_cells(data)
 
-	fixture = synth.build(item, person, n_items, n_persons, TAU_RANGES, SYNTH_SEED)
+	fixture = generator.build(
+		item, person, n_items, n_persons, generator.TAU_RANGES, generator.SEED
+	)
 	shape = {
 		"at_zero": float((fixture.response == 0.0).mean()),
 		"at_one": float((fixture.response == 1.0).mean()),
@@ -154,7 +157,7 @@ def main() -> None:
 	print(f"response  {shape}")
 
 	fit = model_fit.run(
-		zoi_map,
+		map_loss.build(family),
 		family=family,
 		item_index=item,
 		person_index=person,
@@ -179,7 +182,7 @@ def main() -> None:
 	)
 
 	truth = difficulty.quantities(family, family.to_tau(jnp.asarray(fixture.z)))
-	tables = {"ours_vs_truth": recovery.compare(truth, fit.quantities)}
+	tables = {"ours_vs_truth": compare.compare(truth, fit.quantities)}
 	blocks = [report.comparison(tables["ours_vs_truth"], "ours vs truth")]
 
 	reference_meta: dict[str, object] = {}
@@ -199,8 +202,8 @@ def main() -> None:
 			warmup=cfg.reference.warmup,
 		)
 		theirs = difficulty.quantities(family, family.tau_from_sites(post.mean))
-		tables["reference_vs_truth"] = recovery.compare(truth, theirs)
-		tables["ours_vs_reference"] = recovery.compare(theirs, fit.quantities)
+		tables["reference_vs_truth"] = compare.compare(truth, theirs)
+		tables["ours_vs_reference"] = compare.compare(theirs, fit.quantities)
 		blocks += [
 			report.comparison(tables["reference_vs_truth"], "paper vs truth"),
 			report.comparison(tables["ours_vs_reference"], "ours vs paper"),
@@ -215,7 +218,7 @@ def main() -> None:
 	body = "\n\n".join(blocks)
 	print(f"\n{body}")
 
-	out = out_dir / f"recovery_{args.fixture}.npz"
+	out = out_dir / f"recovery_{args.family}_{args.fixture}.npz"
 	np.savez_compressed(
 		out,
 		true_z=fixture.z,

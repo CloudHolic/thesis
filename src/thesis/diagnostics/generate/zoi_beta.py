@@ -2,26 +2,18 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
-
 import numpy as np
 from scipy.special import expit
 
-from thesis.data import Dataset
+from thesis.diagnostics.cells import Fixture
 
 Z_DIM = 5
 
-
-class Fixture(NamedTuple):
-	"""Synthetic responses and the truth that produced them."""
-
-	item_index: np.ndarray
-	person_index: np.ndarray
-	response: np.ndarray
-	z: np.ndarray
-	theta: np.ndarray
-	n_items: int
-	n_persons: int
+# True item parameters for the synthetic fixture, uniform in tau. Moment-matched to the
+# observed acc marginal: E[y] = sigmoid(b), phi = 2 exp(omega/2) cosh(eta/2),
+# P(y=1) = 1 - sigmoid(gamma_1). gamma_0 sits where the data cannot speak.
+TAU_RANGES = np.array([[0.5, 2.5], [1.5, 5.0], [0.5, 3.5], [-7.0, -5.0], [2.5, 4.5]])
+SEED: int = 20260907
 
 
 def draw_z(rng: np.random.Generator, n_items: int, ranges: np.ndarray) -> np.ndarray:
@@ -68,17 +60,6 @@ def draw_responses(
 	)
 
 	return response
-
-
-def full_cross(n_items: int, n_persons: int) -> tuple[np.ndarray, np.ndarray]:
-	"""Person-sorted indices for every person answering every item."""
-	return np.tile(np.arange(n_items), n_persons), np.repeat(np.arange(n_persons), n_items)
-
-
-def training_cells(data: Dataset) -> tuple[np.ndarray, np.ndarray]:
-	"""The cells a fit train on, in person order, so throughput carries over to fitting."""
-	keep = ~data.held_out
-	return data.item_index[keep], data.person_index()[keep]
 
 
 def build(
